@@ -1,4 +1,4 @@
-import { source } from '@/lib/source';
+import { source, getPageMarkdownUrl } from '@/lib/source';
 import {
   DocsBody,
   DocsDescription,
@@ -9,6 +9,7 @@ import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/components/mdx';
 import type { Metadata } from 'next';
 import { createRelativeLink } from 'fumadocs-ui/mdx';
+import { CopyOpenButton } from '@/components/copy-open-button';
 
 export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   const params = await props.params;
@@ -16,10 +17,14 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   if (!page) notFound();
 
   const MDX = page.data.body;
+  const markdownUrl = getPageMarkdownUrl(page).url;
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full} tableOfContent={{ style: 'clerk' }} tableOfContentPopover={{ style: 'clerk' }}>
-      <DocsTitle>{page.data.title}</DocsTitle>
+      <div className="flex items-start justify-between gap-4 not-prose">
+        <DocsTitle>{page.data.title}</DocsTitle>
+        <CopyOpenButton markdownUrl={markdownUrl} />
+      </div>
       <DocsDescription>{page.data.description}</DocsDescription>
       <DocsBody>
         <MDX
