@@ -1,13 +1,28 @@
 import { docs } from 'collections/server';
-import { loader } from 'fumadocs-core/source';
-import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
+import { loader, type LoaderPlugin } from 'fumadocs-core/source';
+import * as HugeIcons from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { createElement } from 'react';
 import { docsContentRoute, docsImageRoute, docsRoute } from './shared';
 
-// See https://fumadocs.dev/docs/headless/source-api for more info
+function hugeiconsPlugin(): LoaderPlugin {
+  function resolve<T extends { icon?: unknown }>(node: T): T {
+    if (typeof node.icon === 'string') {
+      const icon = (HugeIcons as Record<string, unknown>)[node.icon];
+      if (icon) node.icon = createElement(HugeiconsIcon, { icon: icon as never, className: 'size-4' });
+    }
+    return node;
+  }
+  return {
+    name: 'hugeicons',
+    transformPageTree: { file: resolve, folder: resolve, separator: resolve },
+  };
+}
+
 export const source = loader({
   baseUrl: docsRoute,
   source: docs.toFumadocsSource(),
-  plugins: [lucideIconsPlugin()],
+  plugins: [hugeiconsPlugin()],
 });
 
 export function getPageImage(page: (typeof source)['$inferPage']) {

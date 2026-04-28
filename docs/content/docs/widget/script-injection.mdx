@@ -1,0 +1,177 @@
+---
+title: Script Injection
+description: How public/script.js bootstraps the widget on a host page — DOM setup, asset loading, the command queue, and whitelabel detection.
+---
+
+## Overview
+
+The widget uses a two-stage loading system. `script.js` is a small bootstrap script that host pages embed via a `<script>` tag. It sets up the command queue, creates the DOM anchor, and then loads the full `chatbot.js` bundle asynchronously.
+
+```
+Host page loads <script src=".../script.js" widget="UID">
+    │
+    ▼
+script.js runs immediately
+    ├── Detects whitelabel (from script src URL)
+    ├── Reads widget UID (from attribute or global)
+    ├── Sets up window.$yourgptChatbot queue
+    ├── Creates #yourgpt_root div (floating mode only)
+    ├── Appends chatbot.css to <head>
+    └── Appends chatbot.js to <head> (async ES module)
+          │
+          ▼
+      chatbot.js loads → React mounts → flushes queued commands
+```
+
+---
+
+## Widget UID Resolution
+
+The widget UID is resolved in priority order:
+
+```javascript
+const widgetCode =
+  window.YGC_WIDGET_ID ||
+  scriptTag.getAttribute("data-widget") ||
+  scriptTag.getAttribute("widget");
+```
+
+Then stored as a global so the React app can read it on boot:
+
+```javascript
+window.YOURGPT_WIDGET_UID = widgetCode;
+```
+
+`src/widget/utils/helper.ts` → `getChatbotCreds()` reads this global during initialization.
+
+---
+
+## Whitelabel Detection
+
+Detected by inspecting the script's own `src` URL at load time:
+
+```javascript
+const isWhitelabel = !scriptTag.src.includes("yourgpt");
+```
+
+| Script loaded from | `isWhitelabel` | Widget endpoint used |
+|---|---|---|
+| `https://widget.yourgpt.ai/script.js` | `false` | `https://widget.yourgpt.ai` |
+| `https://widget.d4ai.chat/script.js` | `true` | `https://widget.d4ai.chat` |
+
+The resolved endpoint is stored on the global so the React app can route API and socket calls correctly:
+
+```javascript
+window.$yourgptChatbot.WIDGET_ENDPOINT = widgetEndpoint;
+```
+
+See [Whitelabel](./whitelabel) for the full endpoint-switching logic.
+
+---
+
+## DOM Setup (Floating Mode)
+
+For the default floating mode, `script.js` injects a fixed-position div into `document.body`:
+
+```javascript
+if (mode === "floating") {
+  const root = document.createElement("div");
+  root.style.zIndex = 99999999999;
+  root.style.position = "fixed";
+  root.id = "yourgpt_root";
+  document.body.appendChild(root);
+}
+```
+
+React mounts into `#yourgpt_root`. The extreme z-index ensures the widget floats above all host page content without needing CSS specificity battles.
+
+For `embedded` or `iframe` modes this div is not created — the host page provides its own container.
+
+---
+
+## Asset Loading
+
+**CSS** is appended to `<head>` first:
+
+```javascript
+appendCSSFileToHead(widgetEndpoint + "/chatbot.css?v=1.0.1");
+```
+
+**JS bundle** is loaded as an async ES module:
+
+```javascript
+const gptSc = document.createElement("script");
+gptSc.src = widgetEndpoint + "/chatbot.js?v=1.0.1";
+gptSc.async = true;
+gptSc.type = "module";
+document.getElementsByTagName("head")[0]?.appendChild(gptSc);
+```
+
+The `?v=1.0.1` version query string busts CDN cache on each release without requiring cache-control header changes.
+
+---
+
+## The Command Queue (`window.$yourgptChatbot`)
+
+`chatbot.js` takes time to load. Any host page calls to the widget API before it loads must be queued so they aren't lost. `script.js` sets up a stub queue object immediately:
+
+```javascript
+window.$yourgptChatbot = {
+  q: [],
+  execute: function(action, ...data) { this.q.push(["execute", action, ...data]); },
+  on:      function(event, callback)  { this.q.push(["on", event, callback]); },
+  off:     function(event, callback)  { this.q.push(["off", event, callback]); },
+  set:     function(key, value)       { this.q.push(["set", key, value]); },
+};
+```
+
+Host pages can call methods immediately after the `<script>` tag — they're buffered in `q[]`:
+
+```html
+<script>
+  window.$yourgptChatbot = window.$yourgptChatbot || [];
+  window.$yourgptChatbot.on("init", () => console.log("widget ready"));
+  window.$yourgptChatbot.set("visitor:data", { name: "Alice" });
+</script>
+<script src="https://widget.yourgpt.ai/script.js" widget="UID" async></script>
+```
+
+Once `chatbot.js` loads, `src/widget/containers/SdkManager.tsx` replaces the stub with the real implementation and flushes `q[]` in order.
+
+---
+
+## Initialization Timing
+
+The bootstrap runs on both `DOMContentLoaded` and immediately, covering all script placement scenarios:
+
+```javascript
+document.addEventListener("DOMContentLoaded", YOURGPT_CHATBOT_SDK.initScript);
+YOURGPT_CHATBOT_SDK.initScript(); // also run now in case DOM is already ready
+```
+
+This means `script.js` works whether placed in `<head>`, end of `<body>`, or loaded dynamically.
+
+---
+
+## Script Variants
+
+| File | Endpoints | Use for |
+|---|---|---|
+| `public/script.js` | `widget.yourgpt.ai` / `widget.d4ai.chat` | Production |
+| `public/script_dev.js` | `dev-widget.yourgpt.ai` | Staging / CI |
+| `public/script_local.js` | `localhost:4173` | Local development |
+
+When testing locally, embed `script_local.js` in your test HTML page so it loads the bundle from your local preview server (`npm run preview`) instead of production.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `public/script.js` | The bootstrap script embedded in host pages |
+| `public/script_dev.js` | Dev variant — dev-widget endpoint |
+| `public/script_local.js` | Local variant — localhost:4173 |
+| `src/index.tsx` | React entry point — reads `window.YOURGPT_WIDGET_UID`, mounts app |
+| `src/widget/utils/helper.ts` | `getChatbotCreds()` — resolves widget UID and full-page flag |
+| `src/widget/containers/SdkManager.tsx` | Flushes the `$yourgptChatbot.q[]` queue on mount |

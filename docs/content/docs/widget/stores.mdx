@@ -1,12 +1,6 @@
 ---
-title: State Stores
-description: All Zustand stores — global, widget-specific, and streaming — and how they relate to each other.
----
-
-# State Management (Stores)
-
-The widget uses **Zustand** for all state management, with **Immer** middleware for immutable updates. Each store owns a specific domain — there is no single global mega-store.
-
+title: State Management (Stores)
+description: The widget uses Zustand for all state management, with Immer middleware for immutable updates. Each store owns a specific domain.
 ---
 
 ## Store Map
@@ -103,7 +97,7 @@ Manages text-to-speech playback queue and state.
 
 **File:** `src/widget/store/aiActionsStore.ts`
 
-Manages the lifecycle of AI-triggered widget actions. See [AI Actions](ai-actions) for the full explanation.
+Manages the lifecycle of AI-triggered widget actions. See [AI Actions](./ai-actions) for the full explanation.
 
 | State | Description |
 |---|---|

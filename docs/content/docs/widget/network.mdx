@@ -1,0 +1,290 @@
+---
+title: Network & API Reference
+description: The HTTP client and all REST endpoints the widget calls — params, types, and which files call each one.
+---
+
+## HTTP Client
+
+**File:** `src/widget/network/index.ts`
+
+Two thin wrappers around the browser's `fetch` API.
+
+### `post(params)`
+
+```typescript
+post({
+  route: string,       // path appended to base endpoint
+  data: any,           // request body (string or URLSearchParams)
+  config: { headers }, // merged into fetch headers
+  endpoint?: string,   // override base URL (default: ENDPOINT constant)
+}): Promise<any>
+```
+
+- Returns parsed JSON on 2xx.
+- Throws the parsed error body on non-2xx.
+
+### `get(params)`
+
+```typescript
+get({
+  route: string,
+  config?: { headers },
+}): Promise<any>
+```
+
+Less commonly used. Same error-throwing behaviour as `post`.
+
+### Endpoint Selection
+
+```typescript
+const ENDPOINT = import.meta.env.VITE_API_ENDPOINT || getApiEndpoint();
+```
+
+Priority: dev env var (`VITE_API_ENDPOINT`) → runtime detection from `WIDGET_ENDPOINT` global (YourGPT vs whitelabel). See [Whitelabel](./whitelabel) for how `getApiEndpoint()` picks the backend.
+
+---
+
+## REST Endpoints
+
+**File:** `src/widget/network/api.ts`
+
+All 12 functions call `post()`. The base path for every route is `/chatbot/v1/public/`.
+
+---
+
+### `getChatbotSettingApi`
+
+Fetches the full widget configuration (layout, theming, triggers, helpdesk flag, etc.). Called once on boot before anything else renders.
+
+```typescript
+getChatbotSettingApi({ widget_uid: string })
+```
+
+**Route:** `POST /chatbot/v1/public/getChatbotSetting`
+
+**Content-Type:** `application/x-www-form-urlencoded`
+
+**Called from:** `src/widget/store/index.ts` — `initWidget()`
+
+---
+
+### `getSessionByVisitorIdApi`
+
+Lists sessions for a visitor. Used by the Tabs widget to populate the Messages tab, and by Compact/Search to check for an existing session.
+
+```typescript
+getSessionByVisitorIdApi({
+  visitor_uid: string,
+  widget_uid: string,
+  orderBy: "asc" | "desc",
+  page?: number,
+  limit?: number,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getSessionByVisitorId`
+
+**Called from:** `tabsStore.ts`, `compactStore.ts`, `searchStore.ts`
+
+---
+
+### `getSessionByUserHashApi`
+
+Same as `getSessionByVisitorIdApi` but requires a `user_hash` for HMAC-verified identity. Used when the operator has enabled identity verification.
+
+```typescript
+getSessionByUserHashApi({
+  visitor_uid: string,
+  user_hash: string,
+  widget_uid: string,
+  orderBy: "asc" | "desc",
+  page?: number,
+  limit?: number,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getSessionByUserHash`
+
+---
+
+### `getSessionByUidApi`
+
+Fetches a single session directly by its UID. Used when the session UID is already known (e.g. from localStorage restore).
+
+```typescript
+getSessionByUidApi({
+  session_uid?: string,
+  widget_uid: string,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getSessionByUid`
+
+---
+
+### `getSessionMessagesApi`
+
+Loads paginated message history for a session. Called when a chat screen first opens (if not yet hydrated).
+
+```typescript
+getSessionMessagesApi({
+  session_uid: string,
+  widget_uid: string,
+  page?: number,
+  limit?: number,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getSessionMessage`
+
+**Called from:** `chatStore.ts` (Tabs), `compactStore.ts`, `searchStore.ts`
+
+---
+
+### `submitLeadFormApi`
+
+Submits the pre-chat lead capture form. Called when the user fills in name / email / phone before starting a session.
+
+```typescript
+submitLeadFormApi({
+  session_uid: string,
+  visitor_uid: string,
+  widget_uid: string,
+  data: any,    // form field values
+})
+```
+
+**Route:** `POST /chatbot/v1/public/submitPrechattingForm`
+
+**Called from:** `src/widget/(components)/ChatForm/index.tsx`
+
+---
+
+### `getMessageSignedUrlApi`
+
+Gets a pre-signed S3 URL for file uploads. The client then PUTs the file directly to S3 using the returned URL and fields — the server never proxies file bytes.
+
+```typescript
+getMessageSignedUrlApi({
+  file_name: string,
+  project_id: string,
+  widget_uid: string,
+})
+// Returns: { url: string, fields: Record<string, string> }
+```
+
+**Route:** `POST /chatbot/v1/public/getMessageSignedUrl`
+
+**Called from:** `MediaSender`, `AttachmentSender`, `AudioRecorder`, `FileField` (generative forms)
+
+#### Upload flow
+
+```
+1. getMessageSignedUrlApi()  → { url, fields }
+2. Build FormData from fields + file blob
+3. PUT FormData to url        (direct S3, no auth header)
+4. Send resulting S3 URL as message content via socket
+```
+
+---
+
+### `generateFollowUpQuestionsApi`
+
+Requests AI-generated follow-up questions after a bot reply. Results are shown as suggestion chips below the message.
+
+```typescript
+generateFollowUpQuestionsApi({
+  session_uid: string,
+  widget_uid: string,
+  message_id: string,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/generateFollowupQuestion`
+
+**Called from:** `src/widget/hooks/useMessageReceived.ts` — fired after each incoming bot message
+
+---
+
+### `textToSpeechApi`
+
+Converts a bot message to audio for TTS playback. Returns a signed audio URL.
+
+```typescript
+textToSpeechApi({
+  widget_uid: string,
+  session_uid: string,
+  message_id: string,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/textToSpeech`
+
+**Called from:** `src/widget/store/ttsStore.ts`
+
+---
+
+### `submitGameLeadCaptureApi`
+
+Submits lead info collected during a gamified widget experience (before the reward is shown).
+
+```typescript
+submitGameLeadCaptureApi({
+  name: string,
+  email?: string,
+  phone?: string,
+  widget_uid: string,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/gamificationLeadCapture`
+
+**Called from:** gamification lead capture flow (`TriggerManager` / game components)
+
+---
+
+### `getPageSummaryApi`
+
+Sends current page metadata to the backend for AI context. Used by the page context feature so the bot is aware of what the visitor is reading.
+
+```typescript
+getPageSummaryApi({
+  widget_uid: string,
+  url: string,
+  page_url: string,
+  page_title: string,
+  page_data?: string,   // scraped page text content
+  locale?: string,
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getPageSummary`
+
+**Called from:** `src/widget/store/pageContextStore.ts`
+
+---
+
+### `getWidgetDataByCustomDomainApi`
+
+Used in full-page mode when the widget is hosted on a custom domain. Resolves the `widget_uid` from the domain so no `widget` attribute is needed on the page.
+
+```typescript
+getWidgetDataByCustomDomainApi({
+  domain?: string,   // window.location.hostname
+})
+```
+
+**Route:** `POST /chatbot/v1/public/getWidgetDataByCustomDomain`
+
+**Called from:** `src/widget/index.tsx` — full-page custom domain boot path
+
+---
+
+## Helpdesk API
+
+The helpdesk endpoints (category list, article fetch, search, password auth) are in a separate file and documented separately.
+
+**File:** `src/widget/network/helpdesk.ts`
+
+See [Helpdesk](./helpdesk) for the full reference.
+

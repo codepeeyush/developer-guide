@@ -1,0 +1,223 @@
+---
+title: Helpdesk
+description: The Help tab in the Tabs widget — article browsing, AI-powered search, password-protected content, and the helpdesk API layer.
+---
+
+## Overview
+
+The Helpdesk feature is a built-in knowledge base browser available as the **Help tab** in the Tabs widget layout. It connects to a separate helpdesk API to serve categories, articles, and search results.
+
+Enabled when `layout.helpdesk.enabled === true` in the widget settings response — the Help tab then appears automatically in the tab bar.
+
+---
+
+## Feature Set
+
+- Browse categories and nested sub-categories
+- Read articles (open in new tab)
+- Live search with two result sets (direct + similar)
+- Featured articles on the Help tab home screen
+- Password-protected helpdesk support
+- Language-aware content with automatic English fallback
+
+---
+
+## Architecture
+
+```
+Help Tab (tabs/help/index.tsx)
+    │
+    ├── getCategoryByDomainApi()          ← category list
+    ├── getArticleByCategorySlugApi()     ← articles in a category
+    ├── getFeaturedArticlesByDomainApi()  ← featured on home screen
+    ├── getSuggestionsApi()               ← live search
+    └── authenticateHelpdeskPasswordApi() ← password unlock
+```
+
+All calls use the domain from `layout.helpdesk.domains[0]`.
+
+**File:** `src/widget/network/helpdesk.ts`
+
+---
+
+## API Endpoints
+
+### `getCategoryByDomainApi`
+All top-level categories for the domain.
+
+```typescript
+getCategoryByDomainApi({
+  domain: string,
+  language_code: string,
+  orderBy?: string,
+  search?: string,
+  page?: number,
+  limit?: number,
+  token?: string,       // required for password-protected helpdesks
+})
+```
+
+### `getArticleByCategorySlugApi`
+Articles and sub-categories within a specific category.
+
+```typescript
+getArticleByCategorySlugApi({
+  domain: string,
+  slug: string,          // category slug
+  language_code: string,
+  token?: string,
+})
+// Returns: { category_articles[], sub_categories[] }
+```
+
+### `getFeaturedArticlesByDomainApi`
+Featured articles shown on the Help tab home screen.
+
+```typescript
+getFeaturedArticlesByDomainApi({
+  domain: string,
+  language_code: string,
+  orderBy?: string,
+  page?: number,
+  limit?: number,
+  token?: string,
+})
+```
+
+### `getSuggestionsApi`
+Live search — called as the user types (debounced 500ms).
+
+```typescript
+getSuggestionsApi({
+  search: string,
+  domain: string,
+  language_code: string,
+  token?: string,
+})
+// Returns: { searchResult: SearchedArticle[], similarResult: SearchedArticle[] }
+```
+
+### `authenticateHelpdeskPasswordApi`
+Unlocks a password-protected helpdesk.
+
+```typescript
+authenticateHelpdeskPasswordApi({
+  domain: string,
+  password: string,
+})
+// Returns: { token: string }
+```
+
+---
+
+## Types
+
+**File:** `src/widget/types/helpdesk.ts`
+
+```typescript
+type HelpdeskCategoryD = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  logo_url: string;
+  language_code: string;
+  article_count: string;          // string, not number
+  sub_categories: HelpdeskCategoryD[];
+};
+
+type HelpdeskArticleT = {
+  category_articles: {
+    title: string;
+    description: string;
+    slug: string;
+    id: number;
+  }[];
+  sub_categories: Omit<HelpdeskArticleT, "sub_categories">[];
+};
+
+type SearchedArticle = {
+  id: number;
+  title: string;
+  description: string;
+  slug: string;
+  category: { id: number; name: string; slug: string };
+};
+```
+
+---
+
+## Password-Protected Helpdesks
+
+When `helpdeskLocked === true` (from widget settings), the Help tab shows a password form before any content is visible.
+
+**Unlock flow:**
+1. User enters the helpdesk password.
+2. `authenticateHelpdeskPasswordApi({ domain, password })` is called.
+3. On success, the token is stored via `setHelpdeskApiToken(token)` in `ChatbotContext`.
+4. Token is persisted to `StorageManager` under `helpdeskApiToken`.
+5. All subsequent helpdesk API calls include `Authorization: Bearer <token>`.
+6. On page reload, the stored token is reused — the user doesn't re-enter the password.
+
+---
+
+## Search Behaviour
+
+- Debounced at **500ms** — no API call until the user pauses typing.
+- Returns two lists: `searchResult` (direct matches) and `similarResult` (semantically related).
+- If no results found for the active locale → automatically retries with `language_code: "en"`.
+
+---
+
+## Language Fallback
+
+All helpdesk API calls include the widget's current `locale`. If the API returns an empty result for that language, the Help tab automatically re-fetches with `language_code: "en"`:
+
+```typescript
+// Simplified from tabs/help/index.tsx
+if (categories.length === 0 && locale !== "en") {
+  fetchWithLanguage("en");
+}
+```
+
+---
+
+## Article Links
+
+Articles don't render inline — they open in a new browser tab via `openHelpdeskLink()`:
+
+```
+https://{helpdeskDomain}/article/{slug}-{id}
+```
+
+Example: `https://help.example.com/article/getting-started-42`
+
+---
+
+## State Management
+
+Helpdesk data uses Jotai atoms for categories and React `useState` for transient search state:
+
+```typescript
+const [categories, setCategories] = useAtom(helpdeskCategoriesAtom);
+const [articles, setArticles] = useState<HelpdeskArticleT | null>(null);
+const [searchResults, setSearchResults] = useState<SearchedArticle[]>([]);
+const [similarArticles, setSimilarArticles] = useState<SearchedArticle[]>([]);
+
+// From ChatbotContext
+const { helpdeskApiToken, helpdeskLocked, setHelpdeskApiToken } = useChatbot();
+```
+
+`helpdeskApiToken` persists across reloads. `helpdeskLocked` comes from the settings API response.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/network/helpdesk.ts` | All 5 helpdesk API calls |
+| `src/widget/types/helpdesk.ts` | Category, article, search result types |
+| `src/widget/views/tabsWidget/tabs/help/index.tsx` | Help tab UI (~25KB) |
+| `src/widget/context/ChatbotContext.tsx` | `helpdeskApiToken`, `helpdeskLocked` state |
+| `src/widget/utils/storage/index.ts` | Persists `helpdeskApiToken` across reloads |

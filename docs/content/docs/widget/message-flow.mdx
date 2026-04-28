@@ -3,101 +3,7 @@ title: Message Flow
 description: End-to-end journey of a chat message — from the user pressing send to the response appearing on screen.
 ---
 
-# Message Flow
-
-End-to-end journey of a chat message — from the user pressing send to the response appearing on screen.
-
----
-
-## Overview
-
 All real-time communication goes through **Socket.IO**. REST API calls are only used for loading history or settings. Every message — sent or received — follows a predictable path through the socket layer → store → UI.
-
----
-
-## 1. User Sends a Message
-
-**File:** `src/widget/utils/socket.ts` → `socketManager.sendMessage()`
-
-1. User types and submits in the chat input component.
-2. The widget calls `socketManager.sendMessage({ session_uid, message, ... })`.
-3. This emits a `chatbot:send:message` socket event to the server.
-4. The message is **optimistically added** to the local store immediately so the UI feels instant.
-5. A loading indicator (`loadingStatus: "loading"`) is set on the placeholder bot message.
-
----
-
-## 2. Server Processes & Responds
-
-The server receives the message, runs it through the AI, and sends back a `chatbot:message:received` socket event.
-
-The response payload looks like:
-```typescript
-{
-  message_id: number,
-  message: string,           // full text (may be empty if streaming)
-  send_by: "assistant" | "operator" | "user",
-  session_uid: string,
-  content_type: "text" | "picker" | "image" | ...,
-  stream?: boolean,
-  stream_url?: string,       // present only for real SSE streaming
-  stream_token?: string,
-  streaming?: boolean,
-}
-```
-
----
-
-## 3. Widget Receives the Response
-
-**File:** `src/widget/hooks/useMessageReceived.ts` → `handleMessageReceived()`
-
-This hook is the central routing point. It:
-1. Validates the `session_uid` matches the active session.
-2. Marks the user's message as "seen" via socket.
-3. Decides the **rendering mode** (see [Streaming](streaming)).
-4. Calls `addMessage()` on the appropriate store.
-
-### Rendering mode decision:
-```
-stream_url present?  →  Real SSE Streaming
-is_stream === "1"?   →  Artificial Streaming
-otherwise            →  Non-Streaming (instant)
-```
-
----
-
-## 4. Store Update
-
-**Files:**
-- `src/widget/views/tabsWidget/store/chatStore.ts`
-- `src/widget/views/compactWidget/store/compactStore.ts`
-- `src/widget/views/searchWidget/store/searchStore.ts`
-
-Each widget type has its own message store. `addMessage()` pushes the new message into the `messages` array for the active `sessionUid`. Zustand notifies all subscribers, triggering a re-render.
-
----
-
-## 5. UI Renders
-
-The chat list component reads `messages` from the store and renders each one through `ChatItem2`.
-
-- If `loadingStatus === "loading"` → shows animated loading dots.
-- If `loadingStatus === "streaming"` → shows text progressively with a blinking cursor.
-- If `loadingStatus === null` → full message is displayed.
-
-See [Message Content Types](message-content-types) for how different content types (images, forms, carousels, etc.) are rendered.
-
----
-
-## 6. Post-Message Actions
-
-After the message is fully received, the hook also:
-- Fetches **follow-up question suggestions** via REST API.
-- Increments the **unseen message counter** if the widget is closed.
-- Triggers **scroll to bottom** in the chat list.
-
----
 
 ## Full Flow Diagram
 
@@ -129,7 +35,74 @@ UI re-renders with message
 Follow-up questions fetched (REST)
 ```
 
----
+## Step-by-Step
+
+### 1. User Sends a Message
+
+**File:** `src/widget/utils/socket.ts` → `socketManager.sendMessage()`
+
+1. User types and submits in the chat input component.
+2. The widget calls `socketManager.sendMessage({ session_uid, message, ... })`.
+3. This emits a `chatbot:send:message` socket event to the server.
+4. The message is **optimistically added** to the local store immediately so the UI feels instant.
+5. A loading indicator (`loadingStatus: "loading"`) is set on the placeholder bot message.
+
+### 2. Server Processes & Responds
+
+The server receives the message, runs it through the AI, and sends back a `chatbot:message:received` socket event:
+
+```typescript
+{
+  message_id: number,
+  message: string,           // full text (may be empty if streaming)
+  send_by: "assistant" | "operator" | "user",
+  session_uid: string,
+  content_type: "text" | "picker" | "image" | ...,
+  stream?: boolean,
+  stream_url?: string,       // present only for real SSE streaming
+  stream_token?: string,
+  streaming?: boolean,
+}
+```
+
+### 3. Widget Receives the Response
+
+**File:** `src/widget/hooks/useMessageReceived.ts` → `handleMessageReceived()`
+
+This hook is the central routing point. It:
+1. Validates the `session_uid` matches the active session.
+2. Marks the user's message as "seen" via socket.
+3. Decides the **rendering mode** based on the payload (see [Streaming](./streaming)).
+4. Calls `addMessage()` on the appropriate store.
+
+```
+stream_url present?  →  Real SSE Streaming
+is_stream === "1"?   →  Artificial Streaming
+otherwise            →  Non-Streaming (instant)
+```
+
+### 4. Store Update
+
+Each widget type has its own message store. `addMessage()` pushes the new message into the `messages` array for the active `sessionUid`. Zustand notifies all subscribers, triggering a re-render.
+
+See [Stores](./stores) for the full store breakdown.
+
+### 5. UI Renders
+
+The chat list reads `messages` from the store and renders each one through `ChatItem2`:
+
+- `loadingStatus === "loading"` → animated loading dots
+- `loadingStatus === "streaming"` → text appears progressively with a blinking cursor
+- `loadingStatus === null` → full message is displayed
+
+See [Message Content Types](./message-content-types) for how different content types (images, forms, carousels) are rendered.
+
+### 6. Post-Message Actions
+
+After the message is fully received, the hook also:
+- Fetches **follow-up question suggestions** via REST API.
+- Increments the **unseen message counter** if the widget is closed.
+- Triggers **scroll to bottom** in the chat list.
 
 ## Key Files
 
@@ -140,3 +113,11 @@ Follow-up questions fetched (REST)
 | `src/widget/utils/index.ts` | `getStreamData()` for real SSE streaming |
 | `src/widget/views/*/store/*.ts` | Per-widget message stores |
 | `src/widget/(components)/ChatItem2/index.tsx` | Renders individual messages |
+
+---
+
+<Cards>
+  <Card title="Streaming" description="The three rendering modes and how artificial streaming works" href="./streaming" />
+  <Card title="Message Content Types" description="How ChatItem2 renders text, images, forms, and more" href="./message-content-types" />
+  <Card title="Socket" description="All socket events including chatbot:message:received" href="./socket" />
+</Cards>

@@ -1,21 +1,12 @@
 ---
 title: Widget Types
-description: The three distinct UI layouts — Tabs, Compact, and Search — and when to use each.
+description: The widget ships three distinct UI layouts — Tabs, Compact, and Search — sharing the same socket layer and core logic but differing in structure and navigation.
 ---
-
-# Widget Types
-
-The widget ships three distinct UI layouts: **Tabs**, **Compact**, and **Search**. They share the same socket layer, message hooks, and core logic — but differ in structure, navigation, and store architecture.
-
----
-
-## How the Layout is Selected
-
-**File:** `src/widget/index.tsx`
 
 The active layout is determined by `useChatbot().layout.type`, which comes from the API settings response. The `Widget` component renders the matching layout:
 
 ```typescript
+// src/widget/index.tsx
 switch (layout.type) {
   case LayoutTypeE.tabs:    return <TabsWidget />;
   case LayoutTypeE.compact: return <CompactWidget />;
@@ -23,9 +14,9 @@ switch (layout.type) {
 }
 ```
 
-The layout type can also be overridden locally with `VITE_WIDGET_LAYOUT_TYPE` env var for development.
-
----
+<Callout type="info">
+Override the layout locally during development with `VITE_WIDGET_LAYOUT_TYPE=compact|tab|search` in your `.env.local`. See [Build & Local Dev](./build) for all env vars.
+</Callout>
 
 ## Tabs Widget
 
@@ -44,7 +35,7 @@ The most feature-rich layout. Presents a multi-tab interface inside a chat windo
 ### Navigation
 **File:** `src/widget/views/tabsWidget/store/navigationStore.ts`
 
-Uses a lightweight internal router. Navigation is done via:
+Uses a lightweight internal router:
 ```typescript
 navigationStore.navigate({ route: "/messages", params: { sessionUid } })
 navigationStore.goBack()
@@ -69,8 +60,7 @@ tabsWidget/
     └── help/
 ```
 
-### When to use
-Use for chatbots that need more than just a conversation — helpdesk articles, user profiles, multiple sessions.
+**When to use:** Chatbots that need more than just a conversation — helpdesk articles, user profiles, multiple sessions. See [Helpdesk](./helpdesk) for the Help tab details.
 
 ---
 
@@ -96,10 +86,9 @@ compactWidget/
 - `compactStore` — single flat `messages[]` array + `sessionDetail`
 
 ### IFrame Support
-The compact widget can render inside an `<iframe>` for stricter host page isolation. This is configured via the layout settings.
+The compact widget can render inside an `<iframe>` for stricter host page isolation. Configured via layout settings — see [Embedding](./embedding).
 
-### When to use
-Default for most chatbot use cases. Simple, focused, minimal overhead.
+**When to use:** Default for most chatbot use cases. Simple, focused, minimal overhead.
 
 ---
 
@@ -124,11 +113,9 @@ searchWidget/
 ### Stores
 - `searchStore` — identical structure to `compactStore`
 
-### Styling
-Uses a CSS variable bridge to adapt the host page's styling into the widget.
+Uses a CSS variable bridge to adapt the host page's styling into the widget. See [Theming](./theming) for details.
 
-### When to use
-For search-heavy products where the primary interaction is "find an answer" rather than conversational chat.
+**When to use:** Search-heavy products where the primary interaction is "find an answer" rather than conversational chat.
 
 ---
 
@@ -146,8 +133,6 @@ For search-heavy products where the primary interaction is "find an answer" rath
 | Message stores | **No** | Each widget has its own isolated store |
 | Navigation | **No** | Tabs has router; Compact/Search do not |
 | Socket listener setup | **No** | Each `Wrapper.tsx` registers its own |
-
----
 
 ## Key Files
 

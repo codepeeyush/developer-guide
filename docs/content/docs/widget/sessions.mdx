@@ -1,0 +1,265 @@
+---
+title: Session Management
+description: Session lifecycle, multi-session support in the Tabs widget, storage persistence, and the studio compose flag.
+---
+
+## Overview
+
+A **session** is a single conversation thread identified by a `session_uid` string. The Compact and Search widgets support one active session at a time. The Tabs widget can hold multiple sessions simultaneously, each with its own message history.
+
+---
+
+## Session Lifecycle
+
+```
+Visitor arrives on host page
+    │
+    ▼
+StorageManager checked for stored session
+    ├── Found & valid → joinSession(session_uid)
+    │       └── Load history: getSessionMessagesApi()
+    └── Not found → createSession({ widget_uid, visitor_uid })
+            └── Server: chatbot:session:created
+                    └── session_uid stored in StorageManager
+    │
+    ▼
+Session active — socket listens for messages
+    │
+    ▼
+User leaves / reloads page
+    └── session_uid persisted → same conversation resumes on return
+```
+
+---
+
+## Types
+
+**File:** `src/widget/types/session.ts`
+
+```typescript
+type SessionItemApiD = {
+  session_uid: string;
+  status: string;
+  state: "resolved" | "pending" | "closed";
+  device_type: string;
+  platform: string;
+  visitor_id: number;
+  createdAt: any;
+  updatedAt: any;
+  last_message: string;
+  total_unseen: any;
+};
+```
+
+**From socket** (`src/widget/types/socket.ts`):
+
+```typescript
+type SessionData = {
+  id: number;
+  session_uid: string;
+  token: string;            // auth token used for message requests
+  status: string;
+  device_type: string;
+  platform: string;
+  country: string | null;
+  project_id: number;
+  integration_id: number;
+  createdAt: string;
+  updatedAt: string;
+};
+```
+
+---
+
+## Storage Schema
+
+**File:** `src/widget/utils/storage/schema.ts`
+
+Sessions are persisted per-layout under `ygc-chatbot-{widgetUid}` in localStorage:
+
+```typescript
+// Compact & Search — single session each
+compactLayout: {
+  sessionData: SessionData | null;
+  messages: MessageD[];
+}
+searchLayout: {
+  sessionData: SessionData | null;
+  messages: MessageD[];
+}
+
+// Tabs — array of all sessions
+tabLayout: {
+  sessions: SessionData[];
+  askUserStates?: Record<sessionUid, PersistedAskUserState>;
+  generativeFormStates?: Record<sessionUid, PersistedGenerativeFormState>;
+}
+
+// Widget-wide
+activeSession: ActiveSession | null;   // last open session (for restore on reload)
+```
+
+### Legacy key migration
+
+The storage prefix changed from `yourgpt-chatbot-` to `ygc-chatbot-`. On first load after upgrading, `StorageManager` migrates the data and removes the old key automatically.
+
+---
+
+## Session Creation Payload
+
+```typescript
+socketManager.createSession({
+  widget_uid,
+  visitor_uid,
+  device_type: "mobile" | "desktop",  // detected from user agent
+  platform: "web",
+  language: locale,
+  payload?: {
+    initialMessage?: string,   // auto-sends as first message
+    url?: string,              // current page URL for context
+  }
+})
+```
+
+---
+
+## Clearing Sessions
+
+Each layout has a dedicated clear method:
+
+```typescript
+StorageManager.clearCompactSession(widgetUid);   // resets sessionData + messages
+StorageManager.clearSearchSession(widgetUid);    // resets sessionData + messages
+StorageManager.clearTabSession(widgetUid);       // empties sessions[]
+```
+
+Called when the user taps "New Conversation" in the UI.
+
+---
+
+## Tabs Widget — Multi-Session
+
+The Tabs widget is the only layout that keeps a **list of sessions**. The Messages tab shows them all; tapping one navigates to the chat screen for that session.
+
+### Session list
+
+**File:** `src/widget/views/tabsWidget/store/tabsStore.ts`
+
+```typescript
+sessions: SessionItemApiD[];     // fetched via getSessionByVisitorIdApi()
+loadingSessionList: boolean;
+```
+
+Fetched once on mount via `getSessionByVisitorIdApi({ visitor_uid, widget_uid })`.
+
+### Switching sessions
+
+```typescript
+// In Messages tab — tapping a row:
+navigationStore.navigate({
+  name: "chatScreen",
+  params: { sessionData },
+});
+```
+
+The Chat screen reads `activeRoute.params.sessionData.session_uid` and loads from `chatStore`.
+
+### Per-session message cache
+
+**File:** `src/widget/views/tabsWidget/store/chatStore.ts`
+
+```typescript
+messagesBySessionUid: {
+  [sessionUid: string]: {
+    messages: Message[];
+    loading: boolean;
+    isHydrated: boolean;       // true once REST history has been fetched
+    loadingStatus: "loading" | "streaming" | null;
+  }
+}
+```
+
+`isHydrated` prevents re-fetching message history when switching back to an already-opened session.
+
+### Active session restore
+
+When a session is opened, it's recorded in `useChatbotStore` as `activeSession` and persisted:
+
+```typescript
+setActiveSession({
+  ...sessionData,
+  session_uid: sessionUid,
+  isOpen: true,
+});
+```
+
+On page reload, `initWidget()` reads `activeSession` from storage and navigates back to that conversation automatically.
+
+---
+
+## Studio Compose
+
+When the **YourGPT Studio** (operator dashboard) is composing a message for a session, the widget receives a compose event with a special flag:
+
+```typescript
+type MessageComposeD = {
+  session_uid: string;
+  type: "start" | "stop";
+  is_studio_compose?: boolean;   // true when an operator is typing in Studio
+  content: { type: "typing" | "streaming" | "loading" };
+};
+```
+
+**Handling in Tabs chat** (`tabs/messages/chat/index.tsx`):
+
+```typescript
+if (data.type === "start" && data.is_studio_compose) {
+  setIsStudioCompose(true);    // show studio-specific loading UI
+}
+if (data.type === "stop" && !data.is_studio_compose) {
+  setIsStudioCompose(false);   // clear once studio stops
+}
+```
+
+When `isStudioCompose` is `true` and the chat mode is `awaiting` or `operator`, the input area shows a state indicating the operator is composing — preventing the user from sending while the operator's message is in flight.
+
+`isStudioCompose` is stored in `useChatbotStore` (global state) so all parts of the UI can react to it.
+
+---
+
+## SessionActionManager
+
+**File:** `src/widget/utils/storage/sessionManager.ts`
+
+Tracks which AI actions have already been handled during the current browser session. Uses `sessionStorage` (not `localStorage`) — automatically cleared when the tab closes.
+
+```typescript
+type HandledAction = {
+  messageId: number;
+  actionName: string;
+  timestamp: number;
+  status: "completed" | "failed";
+  response?: string;
+};
+
+sessionActionManager.getHandledActions(widgetUid)   // Map<string, HandledAction>
+sessionActionManager.setHandledActions(widgetUid, map)
+sessionActionManager.clearHandledActions(widgetUid)
+```
+
+`aiActionsStore` consults this before executing any AI action — if the `message_id` is already in the map, the event is silently dropped. This prevents duplicate execution if the socket re-delivers an event.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/types/session.ts` | Session type definitions |
+| `src/widget/utils/storage/schema.ts` | Full storage schema with session fields |
+| `src/widget/utils/storage/index.ts` | Session persistence + clear methods |
+| `src/widget/utils/storage/sessionManager.ts` | Per-session AI action deduplication |
+| `src/widget/views/tabsWidget/store/tabsStore.ts` | Session list state |
+| `src/widget/views/tabsWidget/store/chatStore.ts` | Per-session message cache |
+| `src/widget/views/tabsWidget/tabs/messages/chat/index.tsx` | Session switching + studio compose handling |
+| `src/widget/store/index.ts` | `activeSession`, `isStudioCompose` in global store |

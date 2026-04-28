@@ -1,13 +1,11 @@
 ---
 title: Streaming
-description: The three rendering modes — non-streaming, real SSE, and artificial streaming — and how the widget decides which to use.
+description: When the backend sends a chat response, the widget chooses one of three rendering modes based on the socket payload.
 ---
-
-# Streaming in the YourGPT Widget
 
 ## Overview
 
-When the backend sends a chat response, the widget chooses one of three rendering modes. The decision happens in `src/widget/hooks/useMessageReceived.ts` every time a `chatbot:message:received` socket event is received.
+The decision happens in `src/widget/hooks/useMessageReceived.ts` every time a `chatbot:message:received` socket event is received.
 
 ---
 

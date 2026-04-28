@@ -3,21 +3,14 @@ title: Session Initialization
 description: How the widget boots up — from page load to being ready to accept messages.
 ---
 
-# Session Initialization
-
-How the widget boots up — from page load to being ready to accept messages.
-
----
-
-## Overview
-
 Initialization is a multi-step async process: load settings from the API, connect the socket, identify the visitor, optionally show a pre-chat form, then create or rejoin a session.
 
----
+## Boot Sequence
 
-## Step-by-Step Boot Sequence
+<Steps>
+<Step>
 
-### 1. Entry Point
+### Entry Point
 
 **File:** `src/index.tsx`
 
@@ -30,9 +23,10 @@ The widget script loads on the host page. `src/index.tsx` detects the render mod
 src/index.tsx → ReactDOM.createRoot().render(<App />)
 ```
 
----
+</Step>
+<Step>
 
-### 2. Provider Tree Mounts
+### Provider Tree Mounts
 
 **File:** `src/widget/index.tsx`
 
@@ -48,18 +42,15 @@ The app wraps everything in providers before any UI renders:
 </ChatbotProvider>
 ```
 
----
+</Step>
+<Step>
 
-### 3. Settings Fetch
+### Settings Fetch
 
 **File:** `src/widget/context/ChatbotContext.tsx`
 
-On mount, `ChatbotContext` calls:
-```typescript
-getChatbotSettingApi({ widget_uid })
-```
+On mount, `ChatbotContext` calls `getChatbotSettingApi({ widget_uid })`. This REST call returns the full widget configuration:
 
-This REST call returns the full widget configuration:
 - Layout type (tabs / compact / search)
 - Colors, position, button size
 - Pre-chat form fields
@@ -69,11 +60,13 @@ This REST call returns the full widget configuration:
 
 The response is stored in `useChatbotStore` via `actions.setSettings()`.
 
----
+</Step>
+<Step>
 
-### 4. Socket Connection
+### Socket Connection
 
 After settings load, the socket connects:
+
 ```typescript
 socketManager.connect(widgetUid)
 ```
@@ -82,9 +75,12 @@ On the `"connect"` event:
 - `setupChatbotSocketListeners()` registers all inbound event handlers.
 - `socketManager.joinVisitor()` announces the visitor to the server.
 
----
+See [Socket](./socket) for the full list of events.
 
-### 5. Visitor Identification
+</Step>
+<Step>
+
+### Visitor Identification
 
 **File:** `src/widget/utils/StorageManager.ts`
 
@@ -101,43 +97,42 @@ const visitorUid = StorageManager.getStorage(widgetUid).visitorUid;
 
 This UID is sent with every session-related socket event so the server can track the same person across page reloads.
 
----
+</Step>
+<Step>
 
-### 6. Pre-Chat Form (Optional)
+### Pre-Chat Form (Optional)
 
-If the widget is configured with `leadCapture.enabled === true`, the pre-chat form is shown **before** a session is created.
-
-The form may collect: name, email, phone number.
+If the widget is configured with `leadCapture.enabled === true`, the pre-chat form is shown **before** a session is created. The form may collect: name, email, phone number.
 
 - If the user submits → data is attached to the session via `setContactData()`.
 - If the user skips (if allowed) → session proceeds without the form data.
-- Submission is tracked in storage so the form isn't shown again: `StorageManager.setStorage({ leadSubmitted: true })`.
+- Submission is tracked in storage so the form isn't shown again.
 
----
+</Step>
+<Step>
 
-### 7. Session Create / Rejoin
+### Session Create / Rejoin
 
 **File:** `src/widget/utils/socket.ts`
-
-Two paths:
 
 **New session:**
 ```typescript
 socketManager.createSession({ widget_uid, visitor_uid, contact_data? })
-// Server responds with chatbot:session:created → sets sessionUid in store
+// Server responds: chatbot:session:created → sets sessionUid in store
 ```
 
-**Returning visitor (existing session):**
+**Returning visitor:**
 ```typescript
 socketManager.joinSession({ session_uid })
 // History loaded via REST: getSessionMessagesApi({ session_uid })
 ```
 
-The active `session_uid` is persisted in storage so the same conversation resumes on page reload.
+The active `session_uid` is persisted in storage so the same conversation resumes on page reload. See [Session Management](./sessions) for full session lifecycle details.
 
----
+</Step>
+<Step>
 
-### 8. Widget is Ready
+### Widget is Ready
 
 Once `session_uid` is set in the store:
 - The chat input is enabled.
@@ -145,7 +140,8 @@ Once `session_uid` is set in the store:
 - The socket is listening for new messages.
 - Any queued SDK commands (from `window.$yourgptChatbot.push(...)`) are flushed and executed.
 
----
+</Step>
+</Steps>
 
 ## Storage Schema
 
@@ -160,8 +156,6 @@ Once `session_uid` is set in the store:
 | `locale` | string | User's chosen language |
 | `compactMessages` | array | Cached message list (compact widget) |
 | `executedTriggers` | array | Triggers already fired this session |
-
----
 
 ## SDK Custom Data
 
@@ -178,9 +172,9 @@ window.$yourgptChatbot.push("set", "session:data", { plan: "enterprise", region:
 window.$yourgptChatbot.push("set", "contact:data", { name: "Alice", phone: "+1..." });
 ```
 
-These are queued if called before the socket connects, and flushed automatically once ready.
-
----
+<Callout type="info">
+SDK commands are queued if called before the socket connects, and flushed automatically once the widget is ready.
+</Callout>
 
 ## Key Files
 

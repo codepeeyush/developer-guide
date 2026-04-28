@@ -1,40 +1,91 @@
 ---
-title: Widget Docs
-description: Documentation for the YourGPT chatbot widget codebase. Start here if you're new to the project.
+title: Introduction
+description: Developer documentation for the YourGPT chatbot widget — architecture, configuration, and extension APIs.
 ---
 
-# Widget Developer Docs
+The YourGPT chatbot widget is a fully customizable embeddable chat interface. This documentation covers the widget's internal architecture, configuration options, and extension APIs.
 
-Documentation for the YourGPT chatbot widget codebase. Start here if you're new to the project.
+<Callout>
+If you're new here, start with **Widget Types** to understand the three layout modes, then follow the suggested reading order below.
+</Callout>
 
----
+## What's Covered
+
+<Cards>
+  <Card
+    title="Getting Started"
+    description="Widget layouts, session boot, build setup, and script injection"
+    href="./widget-types"
+  />
+  <Card
+    title="Configuration"
+    description="Theming, i18n, triggers, whitelabel, and helpdesk"
+    href="./theming"
+  />
+  <Card
+    title="Advanced"
+    description="Message flow, streaming, Zustand stores, socket events, and AI actions"
+    href="./message-flow"
+  />
+</Cards>
 
 ## Suggested Reading Order
 
-1. [Widget Types](widget-types) — understand the three layouts (Tabs, Compact, Search)
-2. [Session Initialization](session-init) — how the widget boots: settings → socket → session
-3. [Socket Events](socket) — all socket events, emitters, and listeners
-4. [Message Flow](message-flow) — end-to-end journey of a chat message
-5. [Streaming](streaming) — streaming vs non-streaming rendering modes
-6. [State Stores](stores) — all Zustand stores and how they relate
-7. [Message Content Types](message-content-types) — text, images, forms, carousels, AI actions
-8. [AI Actions](ai-actions) — AI-triggered widget actions and the registration API
-9. [Theming](theming) — CSS variables, colors, RTL
-10. [Internationalization](i18n) — multi-language support and adding new languages
-11. [Embedding](embedding) — integrating the widget into a host page
-12. [Triggers](triggers) — auto-show triggers, gamified variants, lead capture
+<Steps>
+<Step>
 
----
+### [Widget Types](./widget-types)
+Understand the three widget layouts — Tabs, Compact, and Search — and which to use for your use case.
+
+</Step>
+<Step>
+
+### [Session Init](./session-init)
+How the widget boots: loads settings from the API, opens a socket connection, and creates or rejoins a session.
+
+</Step>
+<Step>
+
+### [Message Flow](./message-flow)
+End-to-end journey of a chat message from user input to rendered response.
+
+</Step>
+<Step>
+
+### [Streaming](./streaming)
+How streaming vs non-streaming responses are rendered differently, and the three rendering modes.
+
+</Step>
+<Step>
+
+### [Stores](./stores)
+All Zustand stores and how they connect — global config, per-widget message state, and AI actions.
+
+</Step>
+<Step>
+
+### [Message Content Types](./message-content-types)
+Text, images, forms, carousels, and AI action cards — how each content type is rendered by `ChatItem2`.
+
+</Step>
+<Step>
+
+### [AI Actions](./ai-actions)
+AI-triggered widget actions, the registration API, and built-in actions like `ask_user_question`.
+
+</Step>
+</Steps>
 
 ## Quick Reference
 
 | I want to... | Read |
 |---|---|
-| Understand how messages appear on screen | [Message Flow](message-flow) |
-| Add a new message content type | [Message Content Types](message-content-types) |
-| Add a new AI action | [AI Actions](ai-actions) |
-| Change widget colors | [Theming](theming) |
-| Add a new language | [Internationalization](i18n) |
-| Embed the widget in a page | [Embedding](embedding) |
-| Understand the socket events | [Socket Events](socket) |
-| Understand the state stores | [State Stores](stores) |
+| Understand how messages appear on screen | [Message Flow](./message-flow) |
+| Add a new message content type | [Message Content Types](./message-content-types) |
+| Add a new AI action | [AI Actions](./ai-actions) |
+| Change widget colors | [Theming](./theming) |
+| Add a new language | [i18n](./i18n) |
+| Embed the widget in a page | [Embedding](./embedding) |
+| Set up local development | [Build](./build) |
+| Understand socket events | [Socket](./socket) |
+| Understand state management | [Stores](./stores) |

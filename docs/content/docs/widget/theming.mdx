@@ -1,12 +1,6 @@
 ---
-title: Theming
-description: CSS variables, colors, position, RTL support, and how to apply visual changes to the widget.
----
-
-# Theming & Styling
-
-How the widget's visual appearance is controlled — colors, position, layout, RTL, and how to apply changes.
-
+title: Theming & Styling
+description: How the widget's visual appearance is controlled — colors, position, layout, RTL, and how to apply changes.
 ---
 
 ## Architecture
@@ -53,7 +47,7 @@ For any color that needs opacity variants (e.g., hover states, shadows), use the
 background: hsl(var(--yourgptChatbotPrimaryColorHsl));
 
 /* 40% opacity */
-background: hsl(var(--yourgptChatbotPrimaryColorHsl), 0.4);
+background: hsl(var(--yourgptChatbotPrimaryColorHsl) / 0.4);
 ```
 
 ### Position & Layout

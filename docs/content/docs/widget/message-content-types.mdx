@@ -3,12 +3,6 @@ title: Message Content Types
 description: How individual messages are rendered — from plain text to carousels, forms, and AI action cards.
 ---
 
-# Message Content Types
-
-How individual messages are rendered — from plain text to carousels, forms, and AI action cards.
-
----
-
 ## The Rendering Stack
 
 ```
@@ -232,3 +226,35 @@ Uses `react-markdown` with `remark-gfm` (GitHub Flavored Markdown).
 2. Create a new component in `src/widget/(components)/ChatItem2/elements/`.
 3. Add a case for it in the `renderExtra()` switch in `src/widget/(components)/ChatItem2/index.tsx`.
 4. Define the `message.targets` shape for the new type.
+
+---
+
+## ChatItem vs ChatItem2
+
+Two message components exist. They are not interchangeable.
+
+### `ChatItem`
+**File:** `src/widget/(components)/ChatItem/index.tsx`
+
+Simple renderer: sender header, plain text body, timestamp, footer action buttons. No support for rich content types.
+
+**Used for:** pre-chat temporary user messages (the message the user typed before a session was created, shown optimistically while the session spins up).
+
+### `ChatItem2`
+**File:** `src/widget/(components)/ChatItem2/index.tsx`
+
+Full-featured renderer with the complete `elements/` folder of sub-components (Carousel, Card, Form, Audio, Video, File, Action, GenerativeForm, etc.).
+
+**Used for:** every regular message in every layout — welcome messages, bot responses, operator messages, loading states, streaming messages.
+
+### Usage in Tabs chat (`tabs/messages/chat/index.tsx`)
+
+| Message | Component |
+|---|---|
+| Welcome message | `ChatItem2` |
+| Regular bot / operator messages | `ChatItem2` |
+| Streaming message | `ChatItem2` |
+| Loading placeholder | `ChatItem2` |
+| Pre-chat temporary user message | `ChatItem` |
+
+**Rule of thumb:** if you're adding any new message rendering, use `ChatItem2`. `ChatItem` exists only for that one pre-session edge case.

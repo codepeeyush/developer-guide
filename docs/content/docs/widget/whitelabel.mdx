@@ -1,0 +1,117 @@
+---
+title: Whitelabel
+description: How the widget supports whitelabel deployments with separate API, socket, and CDN endpoints under a custom domain.
+---
+
+## Overview
+
+The widget ships identical code for both the YourGPT product and whitelabel deployments. The active endpoint set is determined at runtime from a single signal — the URL `script.js` was loaded from. No code changes or separate builds are needed.
+
+| Deployment | CDN | API | WebSocket |
+|---|---|---|---|
+| YourGPT | `widget.yourgpt.ai` | `api.yourgpt.ai` | `wss.yourgpt.ai` |
+| Whitelabel | `widget.d4ai.chat` | `api.d4ai.chat` | `wss.d4ai.chat` |
+
+---
+
+## Detection Flow
+
+### Step 1 — Script tag (`public/script.js`)
+
+When `script.js` loads it checks its own `src` URL:
+
+```javascript
+const isWhitelabel = !scriptTag.src.includes("yourgpt");
+
+const widgetEndpoint = isWhitelabel
+  ? "https://widget.d4ai.chat"
+  : "https://widget.yourgpt.ai";
+
+window.$yourgptChatbot.WIDGET_ENDPOINT = widgetEndpoint;
+```
+
+### Step 2 — React app (`src/widget/utils/config.ts`)
+
+On boot, `config.ts` reads the endpoint global and selects API + socket targets:
+
+```typescript
+const fromWidget = window?.$yourgptChatbot?.WIDGET_ENDPOINT;
+
+const isYourGpt = !fromWidget || fromWidget.includes("yourgpt");
+
+export const getApiEndpoint = () =>
+  isYourGpt ? "https://api.yourgpt.ai" : "https://api.d4ai.chat";
+
+export const getSocketEndpoint = () =>
+  isYourGpt ? "https://wss.yourgpt.ai" : "https://wss.d4ai.chat";
+```
+
+Every HTTP request (`src/widget/network/index.ts`) and the socket connection (`src/widget/utils/socket.ts`) call these functions, so all traffic automatically routes to the correct backend.
+
+### Full-page special case
+
+When the widget runs in full-page mode (hosted at `widget.yourgpt.ai` itself), the hostname takes priority over the `WIDGET_ENDPOINT` global:
+
+```typescript
+if (chatbotCreds?.fullPage) {
+  isYourGpt = window.location.hostname === "widget.yourgpt.ai";
+}
+```
+
+---
+
+## How to Deploy a Whitelabel Instance
+
+### Option 1 — Change the script URL (recommended)
+
+Replace the CDN domain in the `<script>` tag:
+
+```html
+<!-- YourGPT (default) -->
+<script src="https://widget.yourgpt.ai/script.js" widget="UID"></script>
+
+<!-- Whitelabel -->
+<script src="https://widget.d4ai.chat/script.js" widget="UID"></script>
+```
+
+Everything else — `widget` attribute, `window.$yourgptChatbot` API calls — stays identical.
+
+### Option 2 — Runtime override
+
+Set `WIDGET_ENDPOINT` before the script loads:
+
+```html
+<script>
+  window.$yourgptChatbot = window.$yourgptChatbot || {};
+  window.$yourgptChatbot.WIDGET_ENDPOINT = "https://widget.d4ai.chat";
+</script>
+<script src="https://widget.yourgpt.ai/script.js" widget="UID" async></script>
+```
+
+The React app reads `WIDGET_ENDPOINT` during boot, so even if the script itself came from the YourGPT CDN, the API and socket calls will route to the whitelabel backend.
+
+---
+
+## What Changes vs What Stays the Same
+
+| Concern | Changes? |
+|---|---|
+| API backend | Yes — `api.d4ai.chat` instead of `api.yourgpt.ai` |
+| WebSocket server | Yes — `wss.d4ai.chat` instead of `wss.yourgpt.ai` |
+| Widget CDN URL | Yes — `widget.d4ai.chat` |
+| React source code | No — identical bundle |
+| Feature set | No — identical features |
+| `window.$yourgptChatbot` API | No — identical interface |
+| Widget UID format | No — same UID from the same dashboard |
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `public/script.js` | Detects whitelabel from script `src`, sets `WIDGET_ENDPOINT` |
+| `src/widget/utils/config.ts` | Reads `WIDGET_ENDPOINT`, exports `getApiEndpoint()` / `getSocketEndpoint()` |
+| `src/widget/utils/constants/index.ts` | All 4 endpoint constants |
+| `src/widget/network/index.ts` | Calls `getApiEndpoint()` for every HTTP request |
+| `src/widget/utils/socket.ts` | Calls `getSocketEndpoint()` for the socket connection |

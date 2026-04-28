@@ -1,0 +1,117 @@
+---
+title: Build & Local Dev
+description: How to run the widget locally, configure environment variables, and produce a production build.
+---
+
+## Prerequisites
+
+- **Node.js** 18 or later
+- **npm** (or pnpm/yarn — project uses npm scripts)
+
+---
+
+## Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+The dev server starts at `http://localhost:5173` (accessible on your local network via `--host`).
+
+### Loading a real widget
+
+The widget needs a `widget_uid` to fetch settings and connect to the socket. Pass it via URL:
+
+```
+http://localhost:5173/<YOUR_WIDGET_UID>
+```
+
+Or set it as an environment variable (create a `.env.local` file):
+
+```bash
+VITE_WIDGET_UID=your_widget_uid_here
+```
+
+---
+
+## Environment Variables
+
+Create a `.env.local` file in the project root to override defaults:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_WIDGET_UID` | — | Widget UID to load on dev server |
+| `VITE_WIDGET_LAYOUT_TYPE` | from API | Override layout locally (`compact`, `tab`, `search`) |
+| `VITE_API_ENDPOINT` | `https://api.yourgpt.ai` | Point at a staging or local backend |
+| `VITE_SOCKET_ENDPOINT` | `https://wss.yourgpt.ai` | Point at a staging or local socket server |
+
+Example `.env.local`:
+```bash
+VITE_WIDGET_UID=abc123
+VITE_WIDGET_LAYOUT_TYPE=tab
+VITE_API_ENDPOINT=https://api-staging.yourgpt.ai
+VITE_SOCKET_ENDPOINT=https://wss-staging.yourgpt.ai
+```
+
+---
+
+## Production Build
+
+```bash
+npm run build
+```
+
+This runs TypeScript type-checking (`tsc`) first, then Vite builds the IIFE bundle:
+
+| Output file | Purpose |
+|---|---|
+| `dist/chatbot.js` | Main widget bundle (IIFE format) |
+| `dist/chatbot.css` | Widget styles |
+| `dist/chatbot-chunk.js` | Code-split chunk |
+
+The IIFE format means the bundle is self-contained — no module system needed on the host page.
+
+---
+
+## Preview Built Output
+
+```bash
+npm run preview
+```
+
+Serves the `dist/` output at `http://localhost:4173`. Useful for verifying the production bundle before deploying.
+
+### Live rebuild + preview
+
+```bash
+npm run preview:watch
+```
+
+Runs Vite build in watch mode and preview server simultaneously. Changes rebuild automatically.
+
+---
+
+## Whitelabel / Custom Endpoint
+
+For whitelabel deployments, the widget endpoint can be overridden at runtime on the host page — no rebuild needed:
+
+```javascript
+window.$yourgptChatbot = window.$yourgptChatbot || [];
+window.$yourgptChatbot.WIDGET_ENDPOINT = "https://widget.yourcompany.com";
+```
+
+This switches both the API and socket endpoints to the whitelabel domain (`api.d4ai.chat` / `wss.d4ai.chat` by default for whitelabel builds).
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `vite.config.ts` | Vite config — IIFE output, plugins (React, tsconfig-paths) |
+| `tsconfig.json` | TypeScript config — ES2021 target, strict mode |
+| `public/script.js` | SDK loader injected into host pages (production) |
+| `public/script_dev.js` | SDK loader pointing at dev server |
+| `public/script_local.js` | SDK loader pointing at localhost |
+| `.babelrc` | Babel config for formatjs i18n extraction |
