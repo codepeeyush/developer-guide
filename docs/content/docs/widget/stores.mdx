@@ -1,0 +1,203 @@
+---
+title: State Stores
+description: All Zustand stores — global, widget-specific, and streaming — and how they relate to each other.
+---
+
+# State Management (Stores)
+
+The widget uses **Zustand** for all state management, with **Immer** middleware for immutable updates. Each store owns a specific domain — there is no single global mega-store.
+
+---
+
+## Store Map
+
+```
+src/widget/store/
+├── useChatbotStore.ts      ← main global store
+├── streamingStore.ts       ← active streaming state
+├── ttsStore.ts             ← text-to-speech playback
+├── aiActionsStore.ts       ← AI action registration & execution
+└── pageContextStore.ts     ← custom page-level metadata
+
+src/widget/views/tabsWidget/store/
+├── tabsStore.ts            ← tab list, active tab
+├── chatStore.ts            ← messages per session (tabs widget)
+└── navigationStore.ts      ← in-widget route state
+
+src/widget/views/compactWidget/store/
+└── compactStore.ts         ← messages + session (compact widget)
+
+src/widget/views/searchWidget/store/
+└── searchStore.ts          ← messages + session (search widget)
+```
+
+---
+
+## Global Store — `useChatbotStore`
+
+**File:** `src/widget/store/useChatbotStore.ts`
+
+The single source of truth for widget-wide configuration and state.
+
+| State | Type | Description |
+|---|---|---|
+| `settings` | object | API response from `getChatbotSettingApi()` |
+| `layout` | object | Layout type, colors, position, button config |
+| `isPopupOpen` | boolean | Whether the chat window is visible |
+| `sessionUid` | string | Active session ID |
+| `visitorUid` | string | Persistent visitor identifier |
+| `locale` | LanguageCodesE | Current display language |
+| `unseenCount` | number | Unread messages while widget is closed |
+| `loadingStatus` | string | Global init loading state |
+| `sdkRouteLayouts` | array | Dynamic routes set via SDK |
+| `portalTarget` | HTMLElement | Container for portal rendering mode |
+
+### Key actions
+- `actions.setLocale(lang)` — switch language
+- `actions.toggleChatbotPopup(bool)` — open/close widget
+- `actions.setSessionUid(uid)` — set active session
+- `actions.incrementUnseenCount()` — bump badge counter
+
+---
+
+## Streaming Store — `streamingStore`
+
+**File:** `src/widget/store/streamingStore.ts`
+
+Tracks the live streaming state for each session independently.
+
+```typescript
+streamingStates: {
+  [sessionUid: string]: {
+    text: string;            // accumulated text so far
+    isStreaming: boolean;    // true while stream is active
+    streamStartTime: number; // for timeout detection
+    virtualStreamId: number; // unique ID per stream (-timestamp)
+  }
+}
+```
+
+### Key actions
+- `startStreaming(sessionUid)` — initialise a new stream
+- `updateStreamText(sessionUid, chunk)` — append incoming chunk
+- `clearStream(sessionUid)` — mark stream complete
+- `checkStreamTimeout(sessionUid)` — called every 5s, aborts after 30s
+
+---
+
+## TTS Store — `ttsStore`
+
+**File:** `src/widget/store/ttsStore.ts`
+
+Manages text-to-speech playback queue and state.
+
+| State | Description |
+|---|---|
+| `isPlaying` | Whether audio is currently playing |
+| `queue` | Array of message texts to speak |
+| `currentMessageId` | ID of message being spoken |
+
+---
+
+## AI Actions Store — `aiActionsStore`
+
+**File:** `src/widget/store/aiActionsStore.ts`
+
+Manages the lifecycle of AI-triggered widget actions. See [AI Actions](ai-actions) for the full explanation.
+
+| State | Description |
+|---|---|
+| `handledActions` | Map of already-processed action message IDs |
+| `askUserState` | Active "ask user question" UI state |
+| `generativeFormState` | Active generative form UI state |
+| `layoutContext` | Which widget type is active (for storage routing) |
+
+---
+
+## Widget-Specific Message Stores
+
+Each widget type has its own isolated message store. They share the same shape but are completely independent.
+
+### `chatStore` (Tabs Widget)
+**File:** `src/widget/views/tabsWidget/store/chatStore.ts`
+
+```typescript
+messagesBySessionUid: {
+  [sessionUid: string]: {
+    messages: Message[];
+    loading: boolean;
+    isHydrated: boolean;
+    loadingStatus: "loading" | "streaming" | null;
+  }
+}
+```
+
+Supports multiple sessions simultaneously — each tab can have its own session with its own message list.
+
+### `compactStore` (Compact Widget)
+**File:** `src/widget/views/compactWidget/store/compactStore.ts`
+
+```typescript
+messages: Message[];
+sessionDetail: SessionDetail | null;
+loadingStatus: "loading" | "streaming" | null;
+```
+
+Single-session only. Simpler flat structure.
+
+### `searchStore` (Search Widget)
+**File:** `src/widget/views/searchWidget/store/searchStore.ts`
+
+Identical structure to `compactStore`. Single session, flat messages array.
+
+---
+
+## `loadingStatus` — The UI Driver
+
+This field on message stores controls what the chat UI renders:
+
+| Value | UI behaviour |
+|---|---|
+| `"loading"` | Shows animated loading dots |
+| `"streaming"` | Shows text progressively + blinking cursor |
+| `null` | Message is fully displayed |
+
+---
+
+## How Stores Relate
+
+```
+useChatbotStore (global)
+    │
+    ├── provides: sessionUid, settings, layout, locale
+    │
+    ├── tabsWidget
+    │     ├── tabsStore       (which tabs are open)
+    │     ├── chatStore       (messages per sessionUid)
+    │     └── navigationStore (current route/params)
+    │
+    ├── compactWidget
+    │     └── compactStore    (messages + session)
+    │
+    └── searchWidget
+          └── searchStore     (messages + session)
+
+streamingStore  ← used by all widget types during streaming
+aiActionsStore  ← used by all widget types for AI actions
+ttsStore        ← used by all widget types for voice
+```
+
+---
+
+## Zustand Middleware
+
+All stores use:
+- **Immer** — write mutations as if mutable, Immer handles immutability
+- **devtools** (main stores) — visible in Redux DevTools browser extension
+
+Example pattern:
+```typescript
+set((state) => {
+  state.messages.push(newMessage); // looks mutable, is actually immutable
+});
+```

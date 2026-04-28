@@ -1,0 +1,195 @@
+---
+title: Embedding
+description: Integrating the widget into a host page — render modes, the JavaScript SDK, and dynamic portal mounting.
+---
+
+# Embedding the Widget
+
+How to integrate the widget into a host page — the different render modes, the JavaScript API, and how dynamic mounting works.
+
+---
+
+## Render Modes
+
+**File:** `src/widget/types/enum/index.ts` — `WidgetRenderModeE`
+
+| Mode | How it renders | Use case |
+|---|---|---|
+| `floating` | Auto-renders into `#yourgpt_root` div | Default — floating chat button + window |
+| `embedded` | Renders inside a container you provide | Embed widget inline in a page section |
+| `iframe` | Rendered inside an `<iframe>` | Stricter host page isolation |
+
+---
+
+## Mode 1: Floating (Default)
+
+The widget auto-mounts when the script loads.
+
+**Host page setup:**
+```html
+<!-- Add credentials before the script -->
+<script>
+  window.$yourgptChatbot = window.$yourgptChatbot || [];
+  window.$yourgptChatbot.push("init", null, { widgetUid: "YOUR_WIDGET_UID" });
+</script>
+
+<!-- Load the widget -->
+<script src="https://cdn.yourgpt.ai/chatbot.js" async></script>
+```
+
+The script creates a `<div id="yourgpt_root">` and mounts the React app into it. The floating button and chat window appear automatically.
+
+---
+
+## Mode 2: Embedded
+
+Use this when you want the widget inside a specific container on your page (e.g., a sidebar, a help panel).
+
+**Host page setup:**
+```html
+<!-- Your container -->
+<div id="my-chat-container" style="width: 400px; height: 600px;"></div>
+
+<script>
+  window.YGC_WIDGET_RENDER_MODE = "embedded";
+  window.$yourgptChatbot = window.$yourgptChatbot || [];
+  window.$yourgptChatbot.push("init", null, { widgetUid: "YOUR_WIDGET_UID" });
+</script>
+
+<script src="https://cdn.yourgpt.ai/chatbot.js"></script>
+
+<script>
+  // After script loads:
+  window.YGC_WIDGET.renderEmbedded(document.getElementById("my-chat-container"));
+</script>
+```
+
+**File:** `src/index.tsx`
+
+```typescript
+window.YGC_WIDGET = {
+  renderEmbedded: (container: HTMLElement) => {
+    createRoot(container).render(<App widgetRenderMode={WidgetRenderModeE.embedded} />);
+  }
+};
+```
+
+In embedded mode there is no floating button — the widget renders directly into the container and fills it.
+
+---
+
+## Dynamic Portal Mounting
+
+An alternative to `renderEmbedded()` — you can mount the widget into any element at any time using the SDK:
+
+```javascript
+const container = document.getElementById("my-panel");
+window.$yourgptChatbot.push("execute", "widget:mount", container);
+```
+
+This calls `setPortalTarget(container)` in the store and uses React's `createPortal()` to render the widget there without a full re-mount.
+
+**File:** `src/widget/index.tsx`
+```typescript
+if (portalTarget) {
+  return createPortal(<WidgetContent />, portalTarget);
+}
+```
+
+---
+
+## The `window.$yourgptChatbot` API
+
+This is the primary JavaScript API for controlling the widget from the host page.
+
+### Queue pattern
+Commands can be pushed before the widget script has loaded:
+```javascript
+window.$yourgptChatbot = window.$yourgptChatbot || [];
+window.$yourgptChatbot.push("method", "argument", data);
+```
+
+Once the widget loads, queued commands are flushed in order.
+
+### Available methods
+
+**Lifecycle:**
+```javascript
+window.$yourgptChatbot.push("execute", "widget:open")    // open chat window
+window.$yourgptChatbot.push("execute", "widget:close")   // close chat window
+window.$yourgptChatbot.push("execute", "widget:show")    // show widget button
+window.$yourgptChatbot.push("execute", "widget:hide")    // hide widget button
+window.$yourgptChatbot.push("execute", "widget:mount", element)   // portal mount
+window.$yourgptChatbot.push("execute", "widget:unmount")          // portal unmount
+```
+
+**Messaging:**
+```javascript
+window.$yourgptChatbot.push("execute", "message:send", "Hello!")  // send a message
+```
+
+**Custom data:**
+```javascript
+// Visitor profile (persisted to visitor record)
+window.$yourgptChatbot.push("set", "visitor:data", {
+  name: "Alice",
+  email: "alice@example.com",
+  phone: "+1234567890"
+});
+
+// Session metadata (attached to this conversation)
+window.$yourgptChatbot.push("set", "session:data", {
+  plan: "enterprise",
+  accountId: "acc_123"
+});
+
+// Contact/lead data
+window.$yourgptChatbot.push("set", "contact:data", {
+  name: "Alice",
+  email: "alice@example.com"
+});
+```
+
+**Event listeners:**
+```javascript
+window.$yourgptChatbot.push("on", "init", () => {
+  console.log("Widget ready");
+});
+
+window.$yourgptChatbot.push("on", "escalatedToHuman", () => {
+  console.log("Handed off to human agent");
+});
+```
+
+**Dynamic routing (Tabs widget):**
+```javascript
+window.$yourgptChatbot.push("execute", "layout:routes", [
+  { path: "/custom", component: MyComponent }
+]);
+```
+
+---
+
+## The `window.YGC_WIDGET` Object
+
+A smaller API for programmatic control after the script loads:
+
+```typescript
+interface Window {
+  YGC_WIDGET: {
+    renderEmbedded: (container: HTMLElement) => void;
+  };
+  YGC_WIDGET_RENDER_MODE?: "floating" | "embedded";
+}
+```
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/index.tsx` | Entry point, render mode detection, `YGC_WIDGET` export |
+| `src/widget/containers/SdkManager.tsx` | `$yourgptChatbot` command processor |
+| `src/widget/index.tsx` | Portal rendering via `createPortal` |
+| `src/widget/types/enum/index.ts` | `WidgetRenderModeE` enum |

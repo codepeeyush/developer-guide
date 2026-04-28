@@ -1,0 +1,166 @@
+---
+title: Socket Events
+description: All Socket.IO events, emitters, listeners, and the connection lifecycle.
+---
+
+# Socket Layer
+
+All real-time communication in the widget uses **Socket.IO**. This document covers the connection lifecycle, all events emitted and listened to, and the deduplication/fallback logic.
+
+---
+
+## Connection Setup
+
+**File:** `src/widget/utils/socket.ts`
+
+A singleton `SocketManager` class manages the connection. It is instantiated once and reused across the entire widget.
+
+```typescript
+const socketManager = new SocketManager();
+```
+
+### Transport
+Socket.IO connects with WebSocket first, falling back to HTTP long-polling:
+```typescript
+transports: ["websocket", "polling"]
+```
+
+### Endpoint
+Resolved at runtime from:
+1. `VITE_SOCKET_ENDPOINT` environment variable
+2. Derived from the widget's domain if not set
+
+---
+
+## Connection Lifecycle
+
+```
+Widget mounts
+    │
+    ▼
+socketManager.connect(widgetUid)
+    │
+    ▼
+Socket.IO handshake
+    │
+    ▼
+"connect" event fires
+    │
+    ▼
+setupChatbotSocketListeners()   ← registers all inbound listeners
+    │
+    ▼
+socketManager.joinVisitor()     ← announces visitor to server
+    │
+    ▼
+Widget is ready to chat
+    │
+    ▼
+Widget unmounts → socketManager.disconnect()
+```
+
+---
+
+## Events Emitted (Client → Server)
+
+| Event | When | Key payload fields |
+|---|---|---|
+| `chatbot:send:message` | User sends a message | `session_uid`, `message`, `content_type` |
+| `chatbot:session:create` | Starting a new conversation | `widget_uid`, `visitor_uid` |
+| `chatbot:session:join` | Rejoining an existing session | `session_uid` |
+| `chatbot:visitor:join` | Visitor announces presence | `visitor_uid`, `widget_uid` |
+| `chatbot:message:compose` | User is typing (typing indicator) | `session_uid`, `is_composing` |
+| `chatbot:message:seen` | User saw the message | `message_id`, `session_uid` |
+| `chatbot:action:update` | User tapped a picker/action button | `message_id`, `value` |
+| `chatbot:ai:action:ack` | Widget confirmed it can handle an AI action | `request_instance_id` |
+| `chatbot:ai:action:response` | AI action result sent back to server | `request_instance_id`, `result` |
+
+---
+
+## Events Listened (Server → Client)
+
+**File:** `src/widget/types/enum/socket.ts` — `SocketListenE` enum
+
+| Event | Handled in | What it triggers |
+|---|---|---|
+| `chatbot:message:received` | `useMessageReceived.ts` | Renders new bot/operator message |
+| `chatbot:message:compose` | store socket listeners | Shows/hides typing indicator |
+| `chatbot:session:created` | `ChatbotContext.tsx` | Sets active `sessionUid` in store |
+| `chatbot:session:updated` | store socket listeners | Updates session metadata |
+| `chatbot:visitor:data` | `SdkManager.tsx` | Updates visitor profile data |
+| `chatbot:message:edited` | store socket listeners | Updates existing message text |
+| `chatbot:message:deleted` | store socket listeners | Removes message from list |
+| `chatbot:message:seen` | store socket listeners | Marks messages as read |
+| `chatbot:ai:action` | `aiActionsStore.ts` | Triggers an AI action handler |
+
+---
+
+## Listener Setup
+
+**File:** `src/widget/store/socket.ts` (shared) + per-widget `socket.ts` files
+
+Listeners are registered once inside a `useEffect` in each widget's `Wrapper.tsx`:
+
+```typescript
+useEffect(() => {
+  socketManager.socket.on(SocketListenE.messageReceived, handleMessageReceived);
+  return () => {
+    socketManager.socket.off(SocketListenE.messageReceived, handleMessageReceived);
+  };
+}, [handleMessageReceived]);
+```
+
+The cleanup function (`socket.off`) prevents duplicate listeners on re-renders.
+
+---
+
+## Deduplication
+
+The widget guards against processing the same action twice in two ways:
+
+1. **AI Actions** — `aiActionsStore` keeps a `handledActions` Map keyed by `message_id`. Any incoming action whose ID is already in this map is silently dropped.
+
+2. **Message Actions** — Before emitting `chatbot:action:update`, the socket manager checks if the same value was already sent for this message. Duplicate emits are blocked.
+
+---
+
+## Typing Indicator (Compose)
+
+When the user types in the input:
+1. A `chatbot:message:compose` event is emitted with `is_composing: true`.
+2. A debounce timer resets on each keystroke.
+3. When the user stops typing, `is_composing: false` is emitted after a short delay.
+
+The server relays compose events back so human agents see live typing indicators.
+
+---
+
+## Socket Manager Public API
+
+**File:** `src/widget/utils/socket.ts`
+
+```typescript
+socketManager.connect(widgetUid)
+socketManager.disconnect()
+socketManager.sendMessage({ session_uid, message, content_type, ... })
+socketManager.createSession({ widget_uid, visitor_uid })
+socketManager.joinSession({ session_uid })
+socketManager.joinVisitor({ visitor_uid, widget_uid })
+socketManager.sendCompose({ session_uid, is_composing })
+socketManager.sendMessageSeen({ message_id, session_uid })
+socketManager.sendMessageActionUpdate({ message_id, value })
+socketManager.sendAIActionAck({ request_instance_id })
+socketManager.sendAIActionToolResponse({ request_instance_id, result })
+```
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/utils/socket.ts` | SocketManager class — all emitters |
+| `src/widget/store/socket.ts` | Shared listener setup |
+| `src/widget/types/enum/socket.ts` | `SocketListenE` and `SocketEmitE` enums |
+| `src/widget/hooks/useMessageReceived.ts` | Handles the most critical listener |
+| `src/widget/views/*/Wrapper.tsx` | Per-widget listener registration |

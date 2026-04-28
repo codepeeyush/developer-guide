@@ -1,0 +1,154 @@
+---
+title: Theming
+description: CSS variables, colors, position, RTL support, and how to apply visual changes to the widget.
+---
+
+# Theming & Styling
+
+How the widget's visual appearance is controlled — colors, position, layout, RTL, and how to apply changes.
+
+---
+
+## Architecture
+
+All styling flows through a **CSS variable system**. Variables are set once by `RootStyles` (a styled-component at the root level) and consumed by every component below it. No component should use hardcoded colors.
+
+```
+API settings (layout.colors, layout.position)
+    │
+    ▼
+RootStyles.ts — injects CSS variables into :root / .ygpt-chatbot
+    │
+    ▼
+styled-components read var(--yourgptChatbot*)
+    │
+    ▼
+UI renders with correct theme
+```
+
+---
+
+## CSS Variables Reference
+
+**File:** `src/widget/styles/RootStyles.ts`
+
+### Colors
+
+| Variable | Default | Usage |
+|---|---|---|
+| `--yourgptChatbotPrimaryColor` | `#5b5fc7` | Buttons, highlights, accents |
+| `--yourgptChatbotPrimaryColorHsl` | HSL equivalent | Enables opacity variants |
+| `--yourgptChatbotTextColor` | `#ffffff` | Text on primary color backgrounds |
+| `--yourgptChatbotBotMsgBgColor` | `#f3f4f6` | Bot message bubble background |
+| `--yourgptChatbotBotMsgTextColor` | `#1f2937` | Bot message text |
+| `--yourgptChatbotUserMsgBgColor` | derived from primary | User message bubble background |
+| `--yourgptChatbotUserMsgTextColor` | `#ffffff` | User message text |
+
+### HSL Color Usage
+
+For any color that needs opacity variants (e.g., hover states, shadows), use the HSL form:
+
+```css
+/* Full opacity */
+background: hsl(var(--yourgptChatbotPrimaryColorHsl));
+
+/* 40% opacity */
+background: hsl(var(--yourgptChatbotPrimaryColorHsl), 0.4);
+```
+
+### Position & Layout
+
+| Variable | Description |
+|---|---|
+| `--yourgptChatbotPositionX` | Horizontal offset from edge (e.g., `20px`) |
+| `--yourgptChatbotPositionY` | Vertical offset from edge (e.g., `20px`) |
+| `--yourgptChatbotWidgetBtnSize` | Floating button diameter |
+| `--yourgptChatbotWidgetWidth` | Chat window width |
+| `--yourgptChatbotWidgetHeight` | Chat window height |
+
+---
+
+## Dynamic Theming
+
+Colors come from the API response (`layout.colors`) and are applied at runtime:
+
+```typescript
+// In RootStyles.ts
+const primaryColor = layout?.colors?.primaryColor ?? "#5b5fc7";
+const primaryHsl = hexToHsl(primaryColor); // converts to "235, 56%, 57%"
+
+// Injected as CSS variables on the root element
+`:root {
+  --yourgptChatbotPrimaryColor: ${primaryColor};
+  --yourgptChatbotPrimaryColorHsl: ${primaryHsl};
+  ...
+}`
+```
+
+---
+
+## Styling Rule
+
+All widget components must be styled with **styled-components** using CSS variables. Never use:
+- Inline `style={{ color: "#..." }}`
+- Plain CSS files with hardcoded values
+- Tailwind classes (not used in this project)
+
+Example component:
+```typescript
+const BotBubble = styled.div`
+  background: var(--yourgptChatbotBotMsgBgColor);
+  color: var(--yourgptChatbotBotMsgTextColor);
+  border-radius: 12px;
+  padding: 10px 14px;
+`;
+```
+
+---
+
+## Scope
+
+All widget styles are scoped under the `.ygpt-chatbot` CSS class. This prevents the widget's styles from leaking into the host page and vice versa.
+
+---
+
+## RTL Support
+
+Right-to-left languages (Arabic, Hebrew) flip the entire layout direction.
+
+**File:** `src/widget/index.tsx` (~line 133)
+
+```typescript
+<div
+  dir={[LanguageCodesE.ar, LanguageCodesE.he].includes(locale) ? "rtl" : "ltr"}
+  className="ygpt-chatbot"
+>
+```
+
+The `dir="rtl"` attribute causes browsers to automatically mirror:
+- Flex row direction
+- Absolute positioning using `start`/`end` instead of `left`/`right`
+- Text alignment
+
+For poppers and dropdowns, placement strings are also mirrored in code (e.g., `"bottom-end"` → `"bottom-start"` for RTL).
+
+---
+
+## Font
+
+The widget uses **Inter** as the primary font, with system font fallbacks:
+```css
+font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+```
+
+Inter is loaded from the project's assets (not from Google Fonts), so no external network request is needed.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/styles/RootStyles.ts` | CSS variable injection, global widget styles |
+| `src/widget/index.tsx` | `dir` attribute for RTL |
+| `src/widget/context/ChatbotContext.tsx` | Passes `layout.colors` to `RootStyles` |

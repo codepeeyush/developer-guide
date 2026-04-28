@@ -1,0 +1,19 @@
+{
+  "title": "Widget",
+  "root": true,
+  "pages": [
+    "index",
+    "widget-types",
+    "session-init",
+    "socket",
+    "message-flow",
+    "streaming",
+    "stores",
+    "message-content-types",
+    "ai-actions",
+    "theming",
+    "i18n",
+    "embedding",
+    "triggers"
+  ]
+}

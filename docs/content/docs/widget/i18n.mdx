@@ -1,0 +1,195 @@
+---
+title: Internationalization
+description: Multi-language support — how translations are loaded, how to switch languages at runtime, and how to add a new language.
+---
+
+# Internationalization (i18n)
+
+How the widget supports multiple languages, how translations are loaded, and how RTL is handled.
+
+---
+
+## Supported Languages
+
+22 languages with full translation files in `src/widget/lang/`:
+
+| Code | Language | Code | Language |
+|---|---|---|---|
+| `en` | English | `ar` | Arabic |
+| `fr` | French | `hi` | Hindi |
+| `es` | Spanish | `ja` | Japanese |
+| `de` | German | `cn` | Chinese |
+| `it` | Italian | `ko` | Korean |
+| `pt` | Portuguese | `th` | Thai |
+| `ru` | Russian | `ta` | Tamil |
+| `nl` | Dutch | `vi` | Vietnamese |
+| `sv` | Swedish | `id` | Indonesian |
+| `tr` | Turkish | `geo` | Georgian |
+| `he` | Hebrew | `no` | Norwegian |
+
+Additional language codes are defined in `src/widget/types/layout/lang.ts` (100+ entries) for future expansion.
+
+---
+
+## Architecture
+
+**File:** `src/widget/intl/config.ts`
+
+```typescript
+export const USE_REACT_INTL = false; // switch to true to use react-intl library
+```
+
+By default a **lightweight custom implementation** is used instead of the full `react-intl` library. This keeps the bundle smaller. The public API is identical to react-intl so switching is a one-line config change.
+
+**Files:**
+- `src/widget/intl/index.tsx` — factory: exports `useIntl`, `IntlProvider`, `FormattedMessage`
+- `src/widget/intl/customImpl.tsx` — the lightweight custom implementation
+
+---
+
+## Provider Setup
+
+**File:** `src/widget/context/LanguageProvider.tsx`
+
+Wraps the widget at the root level:
+
+```typescript
+// In src/widget/index.tsx
+<LanguageProvider widgetUid={widgetUid}>
+  <Widget />
+</LanguageProvider>
+```
+
+On mount, `LanguageProvider`:
+1. Checks stored language from `StorageManager`.
+2. Falls back to the device's browser locale via `getDeviceLocale()`.
+3. Respects `layout.supportedLanguages` (operator-configured allow list).
+4. Falls back to `layout.defaultLanguage ?? "en"`.
+5. Dynamically imports the matching language JSON file.
+6. Merges with English as a fallback for any missing keys.
+
+---
+
+## Language Loading
+
+Messages are loaded asynchronously:
+
+```typescript
+const messages = await import(`../lang/${locale}.json`);
+// Merge: English keys fill in any gaps in the target language
+const merged = { ...en, ...messages };
+```
+
+This means English is always the fallback — if a translation key is missing in a language file, it shows the English string instead of an empty value.
+
+---
+
+## Using Translations in Components
+
+### Hook: `useIntl()`
+For programmatic formatting (e.g., placeholder text, aria labels):
+
+```typescript
+import { useIntl } from "../../intl";
+
+const { intl } = useIntl();
+
+// Simple key
+intl.formatMessage({ id: "Send", defaultMessage: "Send" })
+
+// With variable substitution
+intl.formatMessage({ id: "timeAgo", defaultMessage: "{value} seconds ago" }, { value: 30 })
+```
+
+### Component: `<FormattedMessage>`
+For inline text in JSX:
+
+```typescript
+import { FormattedMessage } from "../../intl";
+
+<FormattedMessage id="TypeAMessage" defaultMessage="Type a message..." />
+```
+
+---
+
+## Message Format
+
+Translation files support two formats:
+
+**Simple strings:**
+```json
+{ "Send": "Send", "TypeAMessage": "Type a message..." }
+```
+
+**ICU plural format:**
+```json
+{ "timeAgo": "{value, plural, =1{# second ago} other{# seconds ago}}" }
+```
+
+---
+
+## Language Switching at Runtime
+
+**Hook:** `useLanguage()` from `src/widget/context/LanguageProvider.tsx`
+
+```typescript
+const { selectLanguage, locale, defaultLocale } = useLanguage();
+
+// Switch to French
+selectLanguage(LanguageCodesE.fr);
+```
+
+`selectLanguage()`:
+1. Persists the choice to `StorageManager`.
+2. Calls `useChatbotStore.getState().actions.setLocale(lang)`.
+3. Triggers async re-load of the language JSON.
+4. UI re-renders with new strings.
+
+The `<LanguagePicker>` component in the Profile tab exposes this to the user.
+
+---
+
+## RTL (Right-to-Left)
+
+Arabic (`ar`) and Hebrew (`he`) are RTL languages.
+
+**Direction is set at the widget root** (`src/widget/index.tsx`):
+```typescript
+<div dir={isRTL ? "rtl" : "ltr"} className="ygpt-chatbot">
+```
+
+This single `dir` attribute causes the browser to automatically mirror:
+- Flex layouts
+- Text alignment
+- Scroll direction
+
+**Popper/dropdown placement** is also mirrored in code:
+```typescript
+// In LanguagePicker.tsx
+const resolvedPlacement = isRTL
+  ? placement.replace("-end", "-start")
+  : placement;
+```
+
+**Phone numbers in RTL text** are wrapped in Unicode bidirectional isolate characters (`⁦` / `⁩`) to prevent the number sequence from reversing inside RTL paragraphs. This is handled in `MarkdownMessage.tsx`.
+
+---
+
+## Adding a New Language
+
+1. Create `src/widget/lang/<code>.json` — copy `en.json` and translate all values.
+2. Add the language code to `LanguageCodesE` in `src/widget/types/layout/lang.ts`.
+3. Add a display name entry for the new code in the language picker data.
+4. If the language is RTL, add its code to the `RTL_LOCALES` array in `src/widget/(components)/LanguagePicker.tsx`.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/lang/*.json` | Translation strings per language |
+| `src/widget/intl/customImpl.tsx` | Lightweight i18n runtime |
+| `src/widget/intl/config.ts` | Switch between custom and react-intl |
+| `src/widget/context/LanguageProvider.tsx` | Language state, loading, switching |
+| `src/widget/types/layout/lang.ts` | `LanguageCodesE` enum |

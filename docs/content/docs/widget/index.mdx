@@ -1,0 +1,40 @@
+---
+title: Widget Docs
+description: Documentation for the YourGPT chatbot widget codebase. Start here if you're new to the project.
+---
+
+# Widget Developer Docs
+
+Documentation for the YourGPT chatbot widget codebase. Start here if you're new to the project.
+
+---
+
+## Suggested Reading Order
+
+1. [Widget Types](widget-types) — understand the three layouts (Tabs, Compact, Search)
+2. [Session Initialization](session-init) — how the widget boots: settings → socket → session
+3. [Socket Events](socket) — all socket events, emitters, and listeners
+4. [Message Flow](message-flow) — end-to-end journey of a chat message
+5. [Streaming](streaming) — streaming vs non-streaming rendering modes
+6. [State Stores](stores) — all Zustand stores and how they relate
+7. [Message Content Types](message-content-types) — text, images, forms, carousels, AI actions
+8. [AI Actions](ai-actions) — AI-triggered widget actions and the registration API
+9. [Theming](theming) — CSS variables, colors, RTL
+10. [Internationalization](i18n) — multi-language support and adding new languages
+11. [Embedding](embedding) — integrating the widget into a host page
+12. [Triggers](triggers) — auto-show triggers, gamified variants, lead capture
+
+---
+
+## Quick Reference
+
+| I want to... | Read |
+|---|---|
+| Understand how messages appear on screen | [Message Flow](message-flow) |
+| Add a new message content type | [Message Content Types](message-content-types) |
+| Add a new AI action | [AI Actions](ai-actions) |
+| Change widget colors | [Theming](theming) |
+| Add a new language | [Internationalization](i18n) |
+| Embed the widget in a page | [Embedding](embedding) |
+| Understand the socket events | [Socket Events](socket) |
+| Understand the state stores | [State Stores](stores) |

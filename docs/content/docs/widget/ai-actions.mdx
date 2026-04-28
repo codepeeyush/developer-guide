@@ -1,0 +1,239 @@
+---
+title: AI Actions
+description: AI-triggered widget actions — the registration API, built-in actions, and how results are sent back.
+---
+
+# AI Actions
+
+AI Actions let the AI model trigger real behaviours inside the widget or on the host page — ask the user a question, fill a form, take a screenshot, read console logs, navigate the page, and more.
+
+---
+
+## Concept
+
+When the AI decides it needs to interact with the user or the page, it sends an **action event** via socket. The widget receives it, finds the registered handler for that action name, executes it, and sends the result back to the AI.
+
+```
+AI model decides to take an action
+    │ (socket: chatbot:ai:action)
+    ▼
+aiActionsStore.handleAction(data)
+    │
+    ▼
+Look up handler by action name
+    │
+    ▼
+Send ACK to server (confirms widget can handle it)
+    │
+    ▼
+Execute handler(data, helpers)
+    │
+    ▼
+helpers.respond(result) → sends result back to AI
+```
+
+---
+
+## Registration API
+
+**File:** `src/widget/utils/aiActionsSdk.ts`
+
+Actions are registered via `aiActionsSdk`:
+
+```typescript
+// Simple handler
+aiActionsSdk.on("my_action", async (data, helpers) => {
+  const result = await doSomething(data.action.tool.function.arguments);
+  helpers.respond(JSON.stringify(result));
+});
+
+// Structured registration with schema
+aiActionsSdk.register({
+  name: "my_action",
+  description: "What this action does",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: { type: "string" }
+    },
+    required: ["query"]
+  },
+  handler: async (data, helpers) => {
+    const args = JSON.parse(data.action.tool.function.arguments);
+    helpers.respond("done");
+  }
+});
+```
+
+### Deregistration
+```typescript
+aiActionsSdk.off("my_action");
+```
+
+---
+
+## Handler Data & Helpers
+
+Every handler receives:
+
+```typescript
+// data — incoming action from the AI
+data: {
+  action: {
+    tool: {
+      function: {
+        name: string;        // action name
+        arguments: string;   // JSON string — parse with JSON.parse()
+      }
+    },
+    id: string;
+  },
+  message_id: number,
+  session_uid: number,
+  request_instance_id: string,
+  session_data: object,
+}
+
+// helpers — utilities for responding
+helpers: {
+  respond: (message: string) => void,     // send result back to AI
+  confirm: (options: ConfirmOptions) => Promise<boolean>,  // show confirmation dialog
+}
+```
+
+---
+
+## Confirmation Dialog
+
+Use `helpers.confirm()` to ask the user for permission before taking an action:
+
+```typescript
+handler: async (data, helpers) => {
+  const approved = await helpers.confirm({
+    title: "Take screenshot?",
+    description: "The AI wants to capture the current page.",
+    acceptLabel: "Allow",
+    rejectLabel: "Deny",
+  });
+
+  if (approved) {
+    const screenshot = await captureScreen();
+    helpers.respond(JSON.stringify({ screenshot }));
+  } else {
+    helpers.respond(JSON.stringify({ cancelled: true }));
+  }
+}
+```
+
+**File:** `src/widget/(components)/modals/AIActionConfirmDialog.tsx`
+
+The dialog is a `Promise<boolean>` — the handler `await`s it and continues based on the user's choice.
+
+---
+
+## Built-In Actions
+
+**File:** `src/widget/containers/BuiltInActions.tsx`
+
+These are registered automatically before React mounts:
+
+| Action Name | Description |
+|---|---|
+| `screenshot` | Captures the current page as an image |
+| `console_logs` | Reads browser console messages |
+| `network_requests` | Lists recent network requests |
+| `navigate` | Navigates to a URL on the host page |
+| `dom_interaction` | Clicks/fills elements on the host page |
+| `ask_user_question` | Asks the user one or more questions |
+| `show_generative_form` | Shows a dynamically generated form |
+
+---
+
+## ask_user_question
+
+The AI asks the user up to 4 questions and waits for the answers.
+
+**Flow:**
+1. AI sends `ask_user_question` action with a `questions` array.
+2. Handler calls `useAIActionsStore.getState().setAskUserState({ questions, resolve, reject })`.
+3. The UI shows an inline Q&A form in the chat.
+4. User answers and submits → `resolve(answers)` is called.
+5. Handler receives answers and calls `helpers.respond(JSON.stringify(answers))`.
+6. AI continues with the answers.
+
+**File:** `src/tools/builtin/askUserQuestion.ts`
+
+---
+
+## show_generative_form
+
+The AI generates a custom form for the user to fill.
+
+**Flow:**
+1. AI sends `show_generative_form` with form field definitions.
+2. Handler calls `setGenerativeFormState({ fields, resolve, reject })`.
+3. An inline form appears in the chat.
+4. User submits → `resolve(fieldValues)` is called.
+5. Handler sends the values back to the AI.
+
+---
+
+## Action Rendering in Chat
+
+When a message has `message.type === MessageType.aiAction` (value `3`), `ChatItem2` renders it as an `<Action>` card instead of a regular message.
+
+**States per action type:**
+
+| State | ask_user_question | show_generative_form |
+|---|---|---|
+| Loading | "Waiting for your response…" pill | Shimmer animation |
+| Dismissed | Hidden | Hidden |
+| Completed | Q&A summary card | Form field summary card |
+
+**File:** `src/widget/(components)/ChatItem2/elements/Action.tsx`
+
+---
+
+## Persistence & Recovery
+
+If the widget is reloaded mid-action (e.g., user refreshes the page), the action state is restored from localStorage:
+
+- `restoreAskUserState()` — re-shows the question form
+- `restoreGenerativeFormState()` — re-shows the generative form
+
+**File:** `src/widget/store/aiActionsStore.ts` — lines 177–220
+
+---
+
+## Deduplication
+
+Each action is identified by `message_id`. Once handled, the ID is added to `state.handledActions`. Any re-delivery of the same event is silently ignored.
+
+---
+
+## Store Interface
+
+**File:** `src/widget/store/aiActionsStore.ts`
+
+```typescript
+registerAction(name, handler, meta?)
+unregisterAction(name)
+handleAction(data)              // called by socket listener
+getRegisteredActionNames()
+setConfirmHandler(handler)      // called by AIActionConfirmDialog on mount
+setAskUserState(state)
+setGenerativeFormState(state)
+```
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/store/aiActionsStore.ts` | Core action store and lifecycle |
+| `src/widget/utils/aiActionsSdk.ts` | Public registration API |
+| `src/widget/containers/BuiltInActions.tsx` | Built-in action registration |
+| `src/tools/builtin/askUserQuestion.ts` | ask_user_question handler |
+| `src/widget/(components)/ChatItem2/elements/Action.tsx` | Chat UI for action messages |
+| `src/widget/(components)/modals/AIActionConfirmDialog.tsx` | Confirmation dialog |

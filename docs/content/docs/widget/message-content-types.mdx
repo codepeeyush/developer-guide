@@ -1,0 +1,234 @@
+---
+title: Message Content Types
+description: How individual messages are rendered — from plain text to carousels, forms, and AI action cards.
+---
+
+# Message Content Types
+
+How individual messages are rendered — from plain text to carousels, forms, and AI action cards.
+
+---
+
+## The Rendering Stack
+
+```
+messages[] from store
+    │
+    ▼
+ChatItem2 (src/widget/(components)/ChatItem2/index.tsx)
+    ├── Header (sender name, avatar)
+    ├── Text body → MarkdownMessage
+    ├── Extra content → renderExtra() based on content_type
+    │     ├── carousel → <Carousel>
+    │     ├── card     → <Card>
+    │     ├── image    → <img> + <ImageModal>
+    │     ├── audio    → <AudioMessage>
+    │     ├── video    → <VideoItem>
+    │     ├── file     → <FileItem>
+    │     └── form     → <Form>
+    ├── Picker buttons (content_type === "picker")
+    └── Footer (timestamp, seen status)
+```
+
+---
+
+## Content Types
+
+All possible values for `message.content_type`:
+
+```typescript
+type MessageContentTypeD =
+  | "text"
+  | "image"
+  | "video"
+  | "audio"
+  | "picker"
+  | "file"
+  | "card"
+  | "carousel"
+  | "form"
+  | "feedback";
+```
+
+**File:** `src/widget/types/message.ts`
+
+---
+
+## text (default)
+
+The most common type. Message body is rendered through `MarkdownMessage`.
+
+Supports: headings, bold, italic, links, lists, blockquotes, tables, inline code, code blocks, images, emojis.
+
+- Emoji-only messages scale up automatically (1 emoji → 48px, 2 → 38px, 3 → 30px).
+- External links open in a new tab.
+- Phone numbers in RTL languages are wrapped in Unicode isolate characters to prevent direction issues.
+
+**File:** `src/widget/(components)/MarkdownMessage.tsx`
+
+---
+
+## image
+
+Renders a clickable image thumbnail. Clicking opens a full-screen `<ImageModal>`.
+
+```typescript
+// Source: message.url
+```
+
+---
+
+## video
+
+Renders a video player via `react-player`.
+
+```typescript
+// Source: message.url
+```
+
+**File:** `src/widget/(components)/ChatItem2/elements/VideoItem.tsx`
+
+---
+
+## audio
+
+Renders a custom audio player with play/pause controls.
+
+```typescript
+// Source: message.url
+// Props: sent (boolean) — affects styling
+```
+
+**File:** `src/widget/(components)/ChatItem2/elements/AudioMessage.tsx`
+
+---
+
+## file
+
+Renders a downloadable file attachment with filename and size.
+
+**File:** `src/widget/(components)/ChatItem2/elements/FileItem.tsx`
+
+---
+
+## picker
+
+Renders a set of action buttons below the message text.
+
+```typescript
+message.choices: Array<{ label: string; value: string }>
+```
+
+When a button is clicked, `socketManager.sendMessageActionUpdate({ message_id, value })` is emitted. Buttons are disabled after selection. Values in `NON_FLOW_BTN_VALUES` are permanently disabled.
+
+---
+
+## card
+
+A rich card with title, description, optional image, and call-to-action buttons.
+
+```typescript
+message.targets: {
+  actionType: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  buttons?: Array<{ label: string; value: string }>;
+}
+```
+
+**File:** `src/widget/(components)/ChatItem2/elements/Card.tsx`
+
+---
+
+## carousel
+
+Multiple `card` items rendered in a horizontal scroll/slider.
+
+```typescript
+message.targets: {
+  actionType: string;
+  cards: CardTargets[];
+}
+```
+
+**File:** `src/widget/(components)/ChatItem2/elements/Carousel.tsx`
+
+---
+
+## form
+
+Renders an inline form the user can fill and submit. Two sub-types:
+
+| Sub-type | Description |
+|---|---|
+| `simpleForm` | Custom fields (text, number, select, checkbox, phone) |
+| `feedbackForm` | Star rating + optional comment |
+
+```typescript
+message.targets: {
+  form_type: "simpleForm" | "feedbackForm";
+  can_skip: boolean;
+  submit_button_label?: string;
+  skip_button_label?: string;
+  form_fields?: FormFieldsT[];
+  user_action: "submit" | "skip" | null; // null = not yet answered
+}
+```
+
+**File:** `src/widget/(components)/ChatItem2/elements/Form/index.tsx`
+
+---
+
+## feedback
+
+A dedicated feedback submission form (separate from `form` type). Renders directly as a `<Feedback>` component.
+
+---
+
+## AI Action Messages (`MessageType.aiAction`)
+
+A special message type (not a `content_type` but a `message.type` value of `3`) rendered as an `<Action>` card.
+
+Two built-in action UIs:
+
+### ask_user_question
+Shows a Q&A card where the AI has asked the user questions.
+- **Loading state:** Pulsing "Waiting for your response…" pill
+- **Completed state:** Summary card with question/answer pairs
+
+### show_generative_form
+Shows a form the AI dynamically generated.
+- **Loading state:** Shimmer animation with status message
+- **Completed state:** Form summary with field labels and submitted values
+
+**File:** `src/widget/(components)/ChatItem2/elements/Action.tsx`
+
+---
+
+## Markdown Rendering Details
+
+**File:** `src/widget/(components)/MarkdownMessage.tsx`
+
+Uses `react-markdown` with `remark-gfm` (GitHub Flavored Markdown).
+
+| Markdown Element | Rendered As |
+|---|---|
+| `# Heading` | Styled heading (h1–h6) |
+| `**bold**` / `_italic_` | `<strong>` / `<em>` |
+| `[link](url)` | External link (`target="_blank"`) |
+| `- list` / `1. list` | Styled `<ul>` / `<ol>` |
+| `` `code` `` | `<InlineCode>` styled span |
+| ` ```code block``` ` | `<CodeBlockContent>` with copy button |
+| `> blockquote` | Styled blockquote |
+| `\| table \|` | Scrollable table |
+| `![img](url)` | Inline image |
+
+---
+
+## Adding a New Content Type
+
+1. Add the new type string to `MessageContentTypeD` in `src/widget/types/message.ts`.
+2. Create a new component in `src/widget/(components)/ChatItem2/elements/`.
+3. Add a case for it in the `renderExtra()` switch in `src/widget/(components)/ChatItem2/index.tsx`.
+4. Define the `message.targets` shape for the new type.

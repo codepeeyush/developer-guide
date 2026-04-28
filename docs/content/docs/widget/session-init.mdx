@@ -1,0 +1,194 @@
+---
+title: Session Initialization
+description: How the widget boots up — from page load to being ready to accept messages.
+---
+
+# Session Initialization
+
+How the widget boots up — from page load to being ready to accept messages.
+
+---
+
+## Overview
+
+Initialization is a multi-step async process: load settings from the API, connect the socket, identify the visitor, optionally show a pre-chat form, then create or rejoin a session.
+
+---
+
+## Step-by-Step Boot Sequence
+
+### 1. Entry Point
+
+**File:** `src/index.tsx`
+
+The widget script loads on the host page. `src/index.tsx` detects the render mode and mounts the React app into the DOM.
+
+```
+<script src="widget.js"> loaded by host page
+    │
+    ▼
+src/index.tsx → ReactDOM.createRoot().render(<App />)
+```
+
+---
+
+### 2. Provider Tree Mounts
+
+**File:** `src/widget/index.tsx`
+
+The app wraps everything in providers before any UI renders:
+
+```
+<ChatbotProvider>         ← settings, socket, session logic
+  <WidgetProvider>        ← widget-level context (open/close state)
+    <LanguageProvider>    ← i18n
+      <Widget />          ← actual UI
+    </LanguageProvider>
+  </WidgetProvider>
+</ChatbotProvider>
+```
+
+---
+
+### 3. Settings Fetch
+
+**File:** `src/widget/context/ChatbotContext.tsx`
+
+On mount, `ChatbotContext` calls:
+```typescript
+getChatbotSettingApi({ widget_uid })
+```
+
+This REST call returns the full widget configuration:
+- Layout type (tabs / compact / search)
+- Colors, position, button size
+- Pre-chat form fields
+- Supported languages
+- Quick messages, trigger rules
+- Streaming settings (`is_stream`)
+
+The response is stored in `useChatbotStore` via `actions.setSettings()`.
+
+---
+
+### 4. Socket Connection
+
+After settings load, the socket connects:
+```typescript
+socketManager.connect(widgetUid)
+```
+
+On the `"connect"` event:
+- `setupChatbotSocketListeners()` registers all inbound event handlers.
+- `socketManager.joinVisitor()` announces the visitor to the server.
+
+---
+
+### 5. Visitor Identification
+
+**File:** `src/widget/utils/StorageManager.ts`
+
+The visitor gets a persistent UID stored in `sessionStorage` / `localStorage`:
+
+```typescript
+// On first visit: generate and store
+const visitorUid = crypto.randomUUID();
+StorageManager.setStorage({ visitorUid, widgetUid });
+
+// On returning visit: reuse stored UID
+const visitorUid = StorageManager.getStorage(widgetUid).visitorUid;
+```
+
+This UID is sent with every session-related socket event so the server can track the same person across page reloads.
+
+---
+
+### 6. Pre-Chat Form (Optional)
+
+If the widget is configured with `leadCapture.enabled === true`, the pre-chat form is shown **before** a session is created.
+
+The form may collect: name, email, phone number.
+
+- If the user submits → data is attached to the session via `setContactData()`.
+- If the user skips (if allowed) → session proceeds without the form data.
+- Submission is tracked in storage so the form isn't shown again: `StorageManager.setStorage({ leadSubmitted: true })`.
+
+---
+
+### 7. Session Create / Rejoin
+
+**File:** `src/widget/utils/socket.ts`
+
+Two paths:
+
+**New session:**
+```typescript
+socketManager.createSession({ widget_uid, visitor_uid, contact_data? })
+// Server responds with chatbot:session:created → sets sessionUid in store
+```
+
+**Returning visitor (existing session):**
+```typescript
+socketManager.joinSession({ session_uid })
+// History loaded via REST: getSessionMessagesApi({ session_uid })
+```
+
+The active `session_uid` is persisted in storage so the same conversation resumes on page reload.
+
+---
+
+### 8. Widget is Ready
+
+Once `session_uid` is set in the store:
+- The chat input is enabled.
+- Message history is rendered.
+- The socket is listening for new messages.
+- Any queued SDK commands (from `window.$yourgptChatbot.push(...)`) are flushed and executed.
+
+---
+
+## Storage Schema
+
+`StorageManager` persists the following per `widgetUid`:
+
+| Key | Type | Purpose |
+|---|---|---|
+| `visitorUid` | string | Persistent visitor identity |
+| `sessionUid` | string | Active session to rejoin |
+| `isPopupOpen` | boolean | Restore open/closed state on reload |
+| `leadSubmitted` | boolean | Don't show pre-chat form again |
+| `locale` | string | User's chosen language |
+| `compactMessages` | array | Cached message list (compact widget) |
+| `executedTriggers` | array | Triggers already fired this session |
+
+---
+
+## SDK Custom Data
+
+Before or after init, the host page can inject data via `window.$yourgptChatbot`:
+
+```javascript
+// Set visitor profile
+window.$yourgptChatbot.push("set", "visitor:data", { name: "Alice", email: "alice@example.com" });
+
+// Set session metadata (attached to this conversation)
+window.$yourgptChatbot.push("set", "session:data", { plan: "enterprise", region: "us-east" });
+
+// Set contact data (lead capture)
+window.$yourgptChatbot.push("set", "contact:data", { name: "Alice", phone: "+1..." });
+```
+
+These are queued if called before the socket connects, and flushed automatically once ready.
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/index.tsx` | Entry point, mounts React |
+| `src/widget/context/ChatbotContext.tsx` | Settings fetch, socket init, session logic |
+| `src/widget/utils/socket.ts` | `createSession`, `joinSession`, `joinVisitor` |
+| `src/widget/utils/StorageManager.ts` | Persistent storage abstraction |
+| `src/widget/containers/SdkManager.tsx` | SDK command queue and execution |
+| `src/widget/network/api.ts` | `getChatbotSettingApi`, `getSessionMessagesApi` |

@@ -1,0 +1,160 @@
+---
+title: Streaming
+description: The three rendering modes — non-streaming, real SSE, and artificial streaming — and how the widget decides which to use.
+---
+
+# Streaming in the YourGPT Widget
+
+## Overview
+
+When the backend sends a chat response, the widget chooses one of three rendering modes. The decision happens in `src/widget/hooks/useMessageReceived.ts` every time a `chatbot:message:received` socket event is received.
+
+---
+
+## Decision Tree
+
+```
+chatbot:message:received (socket event)
+        │
+        ▼
+  data.stream_url exists?
+  ┌─────┴──────┐
+ YES           NO
+  │             │
+  ▼             ▼
+Real SSE    is_stream setting === "1"?
+Streaming   ┌─────┴──────┐
+           YES           NO
+            │             │
+            ▼             ▼
+        Artificial    Non-Streaming
+        Streaming     (instant)
+```
+
+---
+
+## Mode 1: Non-Streaming (Instant Display)
+
+**Trigger:** `setting.is_stream !== "1"` (streaming disabled in widget settings)
+
+### How it works
+1. The server sends a **single socket event** containing the complete message text.
+2. The widget adds the message to the store immediately with `loadingStatus: null`.
+3. The UI renders the full message at once — no animation, no typing effect.
+
+### Key code
+`src/widget/hooks/useMessageReceived.ts` (~line 401):
+```typescript
+addMessage({
+  ...data,
+  id: data.message_id,
+  loadingStatus: null,
+  localId: Date.now(),
+  createdAt: Date.now(),
+});
+```
+
+---
+
+## Mode 2: Real SSE Streaming (Server-Driven)
+
+**Trigger:** Server includes `stream_url` + `stream_token` in the socket event payload.
+
+### How it works
+1. Socket event arrives with an empty/partial message body and a `stream_url`.
+2. Widget opens a `fetch()` to that URL and reads the response as a `ReadableStream`.
+3. Incoming bytes are decoded with `TextDecoder` (UTF-8).
+4. Each chunk follows SSE format — `data: {...}\n\n` — split on `\n\n`, JSON-parsed.
+5. Text is accumulated in `streamingStore` and the UI re-renders progressively with a blinking cursor.
+6. Server sends an `end` event → stream closes, `loadingStatus` resets to `null`.
+
+### Reliability features
+- **Retry:** Up to 3 automatic retries with 5-second delays on network failure.
+- **Timeout:** 30-second global timeout enforced via `AbortController`.
+
+### Text cleanup
+`parseStreamString()` converts server markers to display characters:
+- `[LINE_END]` → `\n`
+- `||` → `|\n|`
+
+### Key code
+`src/widget/utils/index.ts` → `getStreamData()`
+
+---
+
+## Mode 3: Artificial Streaming (Client-Side Simulation)
+
+**Trigger:** `setting.is_stream === "1"` but no `stream_url` in the socket payload.
+
+### How it works
+1. The server delivers the **complete message text** in one socket event (same as non-streaming).
+2. The widget simulates a typing effect using `setTimeout` loops, revealing characters progressively.
+3. Speed is adaptive based on message length:
+
+| Message length | Delay per tick | Chars per tick |
+|---|---|---|
+| > 500 chars | 6 ms | 4 |
+| > 200 chars | 8 ms | 4 |
+| > 50 chars | 10 ms | 2 |
+| ≤ 50 chars | 16 ms | 2 |
+
+4. If a stream is already in progress, incoming messages are **queued** and played sequentially.
+5. The UI shows a blinking cursor and `loadingStatus: "streaming"` for the duration.
+
+### Key code
+`src/widget/hooks/useMessageReceived.ts` → `handleArtificialStreaming()`
+
+---
+
+## State Management
+
+Streaming state is tracked per session in a dedicated Zustand store:
+
+`src/widget/store/streamingStore.ts`:
+```typescript
+streamingStates: {
+  [sessionUid]: {
+    text: string;           // accumulated response text so far
+    isStreaming: boolean;   // true while stream is active
+    sessionUid: string;
+    streamStartTime: number;
+    virtualStreamId: number;
+  }
+}
+```
+
+`loadingStatus` in each widget's message store drives the UI:
+
+| Value | Meaning |
+|---|---|
+| `"loading"` | Waiting for first byte / socket event |
+| `"streaming"` | Text is actively arriving / being animated |
+| `null` | Message is complete |
+
+---
+
+## Side-by-Side Comparison
+
+| | Non-Streaming | Real SSE | Artificial |
+|---|---|---|---|
+| **Text delivery** | All at once | Chunk by chunk | All at once |
+| **Visual effect** | Instant | Progressive | Simulated progressive |
+| **Transport** | Socket only | Socket + Fetch (SSE) | Socket only |
+| **`loadingStatus`** | Immediately `null` | `"streaming"` → `null` | `"streaming"` → `null` |
+| **Blinking cursor** | No | Yes | Yes |
+| **Server requirement** | None | `stream_url` in payload | None |
+| **Retry / timeout** | No | Yes (3 retries, 30s) | No |
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/hooks/useMessageReceived.ts` | Central decision logic — lines ~310–451 |
+| `src/widget/utils/index.ts` | `getStreamData()` — real SSE fetch + parsing |
+| `src/widget/store/streamingStore.ts` | Per-session streaming state (Zustand) |
+| `src/widget/views/tabsWidget/store/chatStore.ts` | Message store for TabsWidget |
+| `src/widget/views/compactWidget/store/compactStore.ts` | Message store for CompactWidget |
+| `src/widget/views/searchWidget/store/searchStore.ts` | Message store for SearchWidget |
+| `src/widget/utils/socket.ts` | Socket.IO client manager |

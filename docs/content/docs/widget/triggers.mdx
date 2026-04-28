@@ -1,0 +1,217 @@
+---
+title: Triggers
+description: Auto-show triggers, gamified widget variants, and lead capture — how visitor behaviour fires widget actions.
+---
+
+# Trigger System
+
+Triggers automatically show the widget, send pre-filled messages, or launch gamified experiences based on visitor behaviour — without the user clicking the chat button.
+
+---
+
+## Overview
+
+Triggers are configured by the operator in the YourGPT dashboard and delivered as part of the `chatbot_triggers` array in the settings API response. The `TriggerManager` component evaluates them at runtime.
+
+**File:** `src/widget/containers/TriggerManager/index.tsx`
+
+---
+
+## Trigger Event Types
+
+| Type | When it fires |
+|---|---|
+| `visitWebsite` | When the user visits a page (with optional conditions) |
+| `clickElement` | When the user clicks a specific DOM element |
+| `leaveWebsite` | When the user is about to leave the page |
+
+---
+
+## Trigger Conditions
+
+### visitWebsite conditions
+
+| Condition | Type | Description |
+|---|---|---|
+| `pageUrls` | `string[]` | Only fire on these URLs (omit = fire on all pages) |
+| `firstVisit` | `boolean` | Only fire on the visitor's first ever visit |
+| `returningVisit` | `boolean` | Only fire on returning visitors |
+| `timeSpent` | `number` | Seconds the user must spend on the page first |
+| `scrolledPercentage` | `number` | % of page scrolled before firing |
+| `dayConditions` | `number[]` | Days of week (0 = Sunday, 6 = Saturday) |
+| `deviceType` | `"mobile" \| "desktop" \| "all"` | Target device type |
+| `urlParams` | object | URL query parameter matching |
+
+### clickElement conditions
+| Condition | Type | Description |
+|---|---|---|
+| `elementSelectors` | `string[]` | CSS selectors for elements to watch |
+| `delay` | `number` | Seconds to wait after click before firing |
+
+### leaveWebsite conditions
+| Condition | Type | Description |
+|---|---|---|
+| `delay` | `number` | Seconds to wait after leave intent detected |
+
+---
+
+## Trigger Actions
+
+When a trigger fires it can do one or more of:
+
+### `openChatbot`
+Opens the chat window.
+```typescript
+toggleChatbotPopup(true);
+```
+
+### `sendMessage`
+Sends a pre-filled message (appears as if the bot sent it unprompted).
+```typescript
+setTriggerMessages(action.sendMessage.messages.en);
+// Optional: play a notification sound
+playSound(action.sendMessage.sound);
+```
+
+### `showGame`
+Launches a gamified widget variant.
+```typescript
+setTriggerVariant("gamified");
+// Configures game type, questions, reward threshold
+```
+
+---
+
+## Execution Flow
+
+```
+TriggerManager mounts
+    │
+    ▼
+Filter triggers:
+  - status === "1" (enabled)
+  - not type "askai_trigger"
+  - device type matches current device
+  - day conditions match current day
+    │
+    ▼
+Register active triggers:
+  ├── visitWebsite → setInterval + scroll listener
+  ├── clickElement → addEventListener on matching DOM elements
+  └── leaveWebsite → visibilitychange listener
+    │
+    ▼
+Trigger conditions met?
+    │
+    ▼
+executeAction(trigger)
+  ├── Already executed? → skip (check EXECUTED_TRIGGERS)
+  ├── Chatbot already open? → skip
+  └── Execute → add to EXECUTED_TRIGGERS → persist to sessionStorage
+```
+
+---
+
+## Deduplication
+
+Once a trigger fires, its ID is added to `EXECUTED_TRIGGERS` and persisted in `sessionStorage`:
+
+```typescript
+sessionStorage.setItem("executedTriggers", JSON.stringify(EXECUTED_TRIGGERS));
+```
+
+This ensures each trigger fires at most once per browser session. On page reload, the list is read back so triggers don't repeat.
+
+---
+
+## Global State Flags
+
+```typescript
+CAN_REGISTER_TRIGGER = true          // set to false to pause all trigger registration
+CAN_TRIGGER_ACTION = {
+  openChatbot: true,                 // set to false when widget is already open
+  sendMessage: true,
+  showGame: true,
+}
+```
+
+When the chat window opens, `CAN_TRIGGER_ACTION.openChatbot` is set to `false` so triggers don't keep re-opening it. It resets to `true` when the window closes.
+
+---
+
+## Gamified Variants
+
+When a `showGame` trigger fires, the widget switches to a "gamified" variant — a mini-game plays before the chat starts.
+
+### Supported game types
+
+| Game ID | Name |
+|---|---|
+| `bouncyBird` | Bouncy Bird |
+| `emojiRiddle` | Emoji Riddle |
+| `guessMoji` | Guess Moji |
+| `quizMania` | Quiz Mania |
+
+### Game phase flow
+
+```
+Playing → Game Complete → Lead Capture (optional) → Reward/Coupon
+```
+
+Lead capture shows a form before the reward if `leadCapture.enabled === true` and the player's score meets `rewardThreshold`.
+
+**File:** `src/widget/views/*/GameComponents/QuizMania.tsx`
+
+---
+
+## Lead Capture (Pre-Chat Form)
+
+If `leadCapture` is configured, a form is shown before the first message (or before the game reward).
+
+```typescript
+leadCapture: {
+  enabled: boolean;
+  name: boolean;    // show name field
+  email: boolean;   // show email field
+  phone: boolean;   // show phone field
+}
+```
+
+The form is rendered by `<PreChatFormWrapper>` (`src/widget/(components)/PreChatFormWrapper.tsx`) with a slide-in animation.
+
+Submission status is stored so the form isn't shown again:
+```typescript
+StorageManager.setStorage({ leadSubmitted: true, widgetUid });
+```
+
+---
+
+## Click Element Trigger Details
+
+The `TriggerManager` watches for clicks on CSS-selector-matched elements:
+
+```typescript
+// Listener map prevents duplicate listeners on same element
+const listenerMap = new Map<Element, EventListener>();
+
+document.querySelectorAll(elementSelectors).forEach(el => {
+  const handler = () => setTimeout(() => executeAction(trigger), delay * 1000);
+  el.addEventListener("click", handler);
+  listenerMap.set(el, handler);
+});
+
+// Cleanup on unmount
+listenerMap.forEach((handler, el) => el.removeEventListener("click", handler));
+```
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/containers/TriggerManager/index.tsx` | Core trigger logic |
+| `src/widget/containers/TriggerManager/data.ts` | Trigger event type definitions |
+| `src/widget/types/trigger.ts` | Trigger condition types |
+| `src/widget/(components)/PreChatFormWrapper.tsx` | Lead capture form wrapper |
+| `src/widget/containers/SdkManager.tsx` | `game:start` SDK command handler |

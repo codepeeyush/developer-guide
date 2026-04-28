@@ -1,0 +1,160 @@
+---
+title: Widget Types
+description: The three distinct UI layouts — Tabs, Compact, and Search — and when to use each.
+---
+
+# Widget Types
+
+The widget ships three distinct UI layouts: **Tabs**, **Compact**, and **Search**. They share the same socket layer, message hooks, and core logic — but differ in structure, navigation, and store architecture.
+
+---
+
+## How the Layout is Selected
+
+**File:** `src/widget/index.tsx`
+
+The active layout is determined by `useChatbot().layout.type`, which comes from the API settings response. The `Widget` component renders the matching layout:
+
+```typescript
+switch (layout.type) {
+  case LayoutTypeE.tabs:    return <TabsWidget />;
+  case LayoutTypeE.compact: return <CompactWidget />;
+  case LayoutTypeE.search:  return <SearchWidget />;
+}
+```
+
+The layout type can also be overridden locally with `VITE_WIDGET_LAYOUT_TYPE` env var for development.
+
+---
+
+## Tabs Widget
+
+**Location:** `src/widget/views/tabsWidget/`
+
+The most feature-rich layout. Presents a multi-tab interface inside a chat window.
+
+### Tabs
+| Tab | Path | Description |
+|---|---|---|
+| Home | `/home` | Welcome screen, quick actions |
+| Messages | `/messages` | Chat conversation list + active chat |
+| Profile | `/profile` | Visitor info, language picker |
+| Help | `/help` | Help articles, search |
+
+### Navigation
+**File:** `src/widget/views/tabsWidget/store/navigationStore.ts`
+
+Uses a lightweight internal router. Navigation is done via:
+```typescript
+navigationStore.navigate({ route: "/messages", params: { sessionUid } })
+navigationStore.goBack()
+```
+
+### Stores
+- `tabsStore` — list of open tabs, active tab index
+- `chatStore` — messages per `sessionUid` (supports multiple sessions simultaneously)
+- `navigationStore` — current route + params stack
+
+### Structure
+```
+tabsWidget/
+├── index.tsx           ← root, mounts layout + socket listeners
+├── Wrapper.tsx         ← socket listener setup
+├── layout/             ← tab bar, shell chrome
+└── tabs/
+    ├── home/
+    ├── messages/
+    │   └── chat/       ← chat list + ChatItem2 rendering
+    ├── profile/
+    └── help/
+```
+
+### When to use
+Use for chatbots that need more than just a conversation — helpdesk articles, user profiles, multiple sessions.
+
+---
+
+## Compact Widget
+
+**Location:** `src/widget/views/compactWidget/`
+
+A minimal, single-conversation chat window. The most common layout.
+
+### Structure
+```
+compactWidget/
+├── Wrapper.tsx           ← socket listeners, main orchestrator
+├── store/
+│   ├── compactStore.ts   ← messages + session state
+│   └── socket.ts         ← direct socket → store handlers
+└── (components)/
+    └── Chatbot/
+        └── index.tsx     ← chat UI, input, message list
+```
+
+### Stores
+- `compactStore` — single flat `messages[]` array + `sessionDetail`
+
+### IFrame Support
+The compact widget can render inside an `<iframe>` for stricter host page isolation. This is configured via the layout settings.
+
+### When to use
+Default for most chatbot use cases. Simple, focused, minimal overhead.
+
+---
+
+## Search Widget
+
+**Location:** `src/widget/views/searchWidget/`
+
+A full-width, search-first experience. Appears fixed at the bottom-center of the page (not in a corner). Designed for knowledge-base or documentation search flows.
+
+### Structure
+```
+searchWidget/
+├── Wrapper.tsx
+├── store/
+│   ├── searchStore.ts
+│   └── socket.ts
+└── (components)/
+    ├── SearchWidget/     ← entry/landing view
+    └── SearchChat.tsx    ← active conversation view
+```
+
+### Stores
+- `searchStore` — identical structure to `compactStore`
+
+### Styling
+Uses a CSS variable bridge to adapt the host page's styling into the widget.
+
+### When to use
+For search-heavy products where the primary interaction is "find an answer" rather than conversational chat.
+
+---
+
+## What's Shared Across All Three
+
+| Concern | Shared? | Details |
+|---|---|---|
+| Socket connection | Yes | Same `socketManager` singleton |
+| `useMessageReceived` hook | Yes | Same streaming/non-streaming logic |
+| `streamingStore` | Yes | Same streaming state management |
+| `aiActionsStore` | Yes | Same AI action handling |
+| `ChatItem2` component | Yes | Same message renderer |
+| `MarkdownMessage` | Yes | Same markdown/code rendering |
+| Settings / `useChatbotStore` | Yes | Same global config |
+| Message stores | **No** | Each widget has its own isolated store |
+| Navigation | **No** | Tabs has router; Compact/Search do not |
+| Socket listener setup | **No** | Each `Wrapper.tsx` registers its own |
+
+---
+
+## Key Files
+
+| File | Role |
+|---|---|
+| `src/widget/index.tsx` | Layout selector |
+| `src/widget/views/tabsWidget/index.tsx` | Tabs widget root |
+| `src/widget/views/compactWidget/Wrapper.tsx` | Compact widget root |
+| `src/widget/views/searchWidget/Wrapper.tsx` | Search widget root |
+| `src/widget/types/enum/index.ts` | `LayoutTypeE` enum |
